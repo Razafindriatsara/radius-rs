@@ -1,10 +1,12 @@
-//! Minimaler RADIUS-Testclient (PAP + Message-Authenticator).
+//! Minimaler RADIUS-Testclient.
 //!
 //! Aufruf:
 //!   radius-client <benutzer> <passwort> [server:port] [secret]
 //!   radius-client status [server:port] [secret]
+//!   radius-client acct <start|interim|stop> <benutzer> <session-id> [server:port] [secret]
 //!
-//! Standard: 127.0.0.1:1812, Secret "testing123".
+//! Standard: 127.0.0.1:1812 (bzw. :1813 für acct), Secret "testing123".
+//! Exit-Code 0 = Erfolg (Accept bzw. Accounting bestätigt), 1 = Reject/keine Antwort, 2 = Aufruffehler.
 
 use std::net::UdpSocket;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -14,28 +16,71 @@ use radius_rs::attributes::{self, *};
 use radius_rs::crypto;
 use radius_rs::packet::{Code, Packet};
 
+const USAGE: &str = "\
+Aufruf:
+  radius-client <benutzer> <passwort> [server:port] [secret]
+  radius-client status [server:port] [secret]
+  radius-client acct <start|interim|stop> <benutzer> <session-id> [server:port] [secret]";
+
+enum Mode<'a> {
+    Auth {
+        user: &'a str,
+        password: &'a str,
+    },
+    Status,
+    Acct {
+        status: u32,
+        user: &'a str,
+        session_id: &'a str,
+    },
+}
+
 fn main() {
-    if let Err(e) = run() {
-        eprintln!("Fehler: {e}");
-        std::process::exit(2);
+    match run() {
+        Ok(true) => std::process::exit(0),
+        Ok(false) => std::process::exit(1),
+        Err(e) => {
+            eprintln!("Fehler: {e}\n\n{USAGE}");
+            std::process::exit(2);
+        }
     }
 }
 
-fn run() -> anyhow::Result<()> {
+fn run() -> anyhow::Result<bool> {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let status_mode = args.first().map(String::as_str) == Some("status");
+    let a: Vec<&str> = args.iter().map(String::as_str).collect();
 
-    let (user, password, rest) = if status_mode {
-        (None, None, &args[1..])
-    } else if args.len() >= 2 {
-        (Some(args[0].as_str()), Some(args[1].as_str()), &args[2..])
-    } else {
-        anyhow::bail!(
-            "Aufruf: radius-client <benutzer> <passwort> [server:port] [secret]\n       radius-client status [server:port] [secret]"
-        );
+    let (mode, rest) = match a.as_slice() {
+        ["status", rest @ ..] => (Mode::Status, rest),
+        ["acct", status, user, session_id, rest @ ..] => {
+            let status = match *status {
+                "start" => 1,
+                "stop" => 2,
+                "interim" => 3,
+                other => {
+                    anyhow::bail!("unbekannter Accounting-Typ '{other}' (start, interim, stop)")
+                }
+            };
+            (
+                Mode::Acct {
+                    status,
+                    user,
+                    session_id,
+                },
+                rest,
+            )
+        }
+        ["acct", ..] => anyhow::bail!("zu wenige Argumente für acct"),
+        [user, password, rest @ ..] => (Mode::Auth { user, password }, rest),
+        _ => anyhow::bail!("zu wenige Argumente"),
     };
-    let server = rest.first().map(String::as_str).unwrap_or("127.0.0.1:1812");
-    let secret = rest.get(1).map(String::as_str).unwrap_or("testing123").as_bytes();
+    let default_server = if matches!(mode, Mode::Acct { .. }) {
+        "127.0.0.1:1813"
+    } else {
+        "127.0.0.1:1812"
+    };
+    let server = rest.first().copied().unwrap_or(default_server);
+    let secret = rest.get(1).copied().unwrap_or("testing123").as_bytes();
 
     // Request Authenticator: muss unvorhersehbar sein. Für einen Testclient reicht
     // ein Hash aus Zeit und Prozess-ID. Ein produktiver Client nutzt einen CSPRNG.
@@ -47,20 +92,59 @@ fn run() -> anyhow::Result<()> {
         .into();
     let id = (nanos & 0xff) as u8;
 
-    let code = if status_mode { Code::StatusServer } else { Code::AccessRequest };
-    let mut req = Packet::new(code, id, ra);
-    req.add(MESSAGE_AUTHENTICATOR, vec![0u8; 16]);
-    if let (Some(u), Some(p)) = (user, password) {
-        req.add(USER_NAME, u.as_bytes().to_vec());
-        req.add(USER_PASSWORD, crypto::encrypt_user_password(p.as_bytes(), secret, &ra));
-        req.add(NAS_IDENTIFIER, b"radius-client".to_vec());
-    }
-    let mut bytes = req.encode()?;
-    crypto::sign_request_message_authenticator(&mut bytes, secret);
+    let bytes = match &mode {
+        Mode::Auth { user, password } => {
+            let mut req = Packet::new(Code::AccessRequest, id, ra);
+            req.add(MESSAGE_AUTHENTICATOR, vec![0u8; 16]);
+            req.add(USER_NAME, user.as_bytes().to_vec());
+            req.add(
+                USER_PASSWORD,
+                crypto::encrypt_user_password(password.as_bytes(), secret, &ra),
+            );
+            req.add(NAS_IDENTIFIER, b"radius-client".to_vec());
+            let mut b = req.encode()?;
+            crypto::sign_request_message_authenticator(&mut b, secret);
+            b
+        }
+        Mode::Status => {
+            let mut req = Packet::new(Code::StatusServer, id, ra);
+            req.add(MESSAGE_AUTHENTICATOR, vec![0u8; 16]);
+            let mut b = req.encode()?;
+            crypto::sign_request_message_authenticator(&mut b, secret);
+            b
+        }
+        Mode::Acct {
+            status,
+            user,
+            session_id,
+        } => {
+            let mut req = Packet::new(Code::AccountingRequest, id, [0u8; 16]);
+            req.add_u32(ACCT_STATUS_TYPE, *status);
+            req.add(USER_NAME, user.as_bytes().to_vec());
+            req.add(ACCT_SESSION_ID, session_id.as_bytes().to_vec());
+            req.add(NAS_IDENTIFIER, b"radius-client".to_vec());
+            req.add(FRAMED_IP_ADDRESS, vec![10, 0, 0, 42]);
+            if *status != 1 {
+                // Demo-Werte: Dauer und Datenmengen abhängig von der aktuellen Zeit
+                let secs = (nanos / 1_000_000_000 % 3600) as u32 + 60;
+                req.add_u32(ACCT_SESSION_TIME, secs);
+                req.add_u32(ACCT_INPUT_OCTETS, secs * 12_345);
+                req.add_u32(ACCT_OUTPUT_OCTETS, secs * 98_765);
+            }
+            if *status == 2 {
+                req.add_u32(ACCT_TERMINATE_CAUSE, 1); // User-Request
+            }
+            let mut b = req.encode()?;
+            crypto::sign_accounting_request(&mut b, secret);
+            b
+        }
+    };
+    // Bei Accounting ist der Request Authenticator das, was im Paket steht.
+    let ra: [u8; 16] = bytes[4..20].try_into()?;
 
     let sock = UdpSocket::bind("0.0.0.0:0")?;
     sock.set_read_timeout(Some(Duration::from_secs(3)))?;
-    println!("Sende {:?} (ID {id}) an {server} ...", code);
+    println!("Sende {:?} (ID {id}) an {server} ...", Code::from(bytes[0]));
     let start = Instant::now();
     sock.send_to(&bytes, server)?;
 
@@ -69,8 +153,10 @@ fn run() -> anyhow::Result<()> {
         Ok(n) => n,
         Err(_) => {
             println!("Keine Antwort nach 3 s.");
-            println!("Mögliche Ursachen: falsches Secret, Client-IP nicht in config.toml, Server läuft nicht, Firewall.");
-            std::process::exit(1);
+            println!(
+                "Mögliche Ursachen: falsches Secret, Client-IP nicht in config.toml, Server läuft nicht, Firewall."
+            );
+            return Ok(false);
         }
     };
     let elapsed = start.elapsed();
@@ -82,26 +168,48 @@ fn run() -> anyhow::Result<()> {
     crypto::sign_response(&mut check, &ra, secret);
     let auth_ok = check == raw;
 
-    // Message-Authenticator prüfen (mit Request Authenticator im Header)
-    let mut ma_buf = raw.to_vec();
-    ma_buf[4..20].copy_from_slice(&ra);
-    let ma_ok = crypto::verify_message_authenticator(&ma_buf, secret);
+    println!(
+        "Antwort: {:?} (ID {}) in {:.1} ms",
+        resp.code,
+        resp.identifier,
+        elapsed.as_secs_f64() * 1000.0
+    );
+    println!(
+        "  Response Authenticator: {}",
+        if auth_ok { "gültig" } else { "UNGÜLTIG" }
+    );
 
-    println!("Antwort: {:?} (ID {}) in {:.1} ms", resp.code, resp.identifier, elapsed.as_secs_f64() * 1000.0);
-    println!("  Response Authenticator: {}", if auth_ok { "gültig" } else { "UNGÜLTIG" });
-    println!("  Message-Authenticator:  {}", if ma_ok { "gültig" } else { "fehlt/UNGÜLTIG" });
+    // Message-Authenticator prüfen (mit Request Authenticator im Header).
+    // Accounting-Antworten enthalten keinen.
+    let ma_ok = if matches!(mode, Mode::Acct { .. }) {
+        true
+    } else {
+        let mut ma_buf = raw.to_vec();
+        ma_buf[4..20].copy_from_slice(&ra);
+        let ok = crypto::verify_message_authenticator(&ma_buf, secret);
+        println!(
+            "  Message-Authenticator:  {}",
+            if ok { "gültig" } else { "fehlt/UNGÜLTIG" }
+        );
+        ok
+    };
+
     for a in &resp.attributes {
         if a.typ == MESSAGE_AUTHENTICATOR {
             continue;
         }
         let value = match a.typ {
             REPLY_MESSAGE => String::from_utf8_lossy(&a.value).into_owned(),
-            _ if a.value.len() == 4 => u32::from_be_bytes(a.value[..4].try_into().unwrap()).to_string(),
+            _ if a.value.len() == 4 => u32::from_be_bytes(a.value[..4].try_into()?).to_string(),
             _ => format!("{:02x?}", a.value),
         };
         println!("  {}: {}", attributes::name(a.typ), value);
     }
 
-    let accepted = resp.code == Code::AccessAccept && auth_ok && ma_ok;
-    std::process::exit(if accepted { 0 } else { 1 });
+    let expected = if matches!(mode, Mode::Acct { .. }) {
+        Code::AccountingResponse
+    } else {
+        Code::AccessAccept
+    };
+    Ok(resp.code == expected && auth_ok && ma_ok)
 }

@@ -1,6 +1,7 @@
 //! Protokoll-Logik, unabhängig vom Netzwerk und damit gut testbar:
 //! Bytes eines Requests rein, Bytes einer Antwort (oder nichts) raus.
 
+use crate::accounting::{AccountingStore, Record, StatusType};
 use crate::attributes::*;
 use crate::auth::{AuthResult, Authenticator};
 use crate::crypto;
@@ -9,6 +10,8 @@ use crate::packet::{Code, Packet};
 pub struct Handler<A: Authenticator> {
     pub auth: A,
     pub require_message_authenticator: bool,
+    /// Optional: ohne Datenbank werden Accounting-Requests nur geloggt und bestätigt.
+    pub accounting: Option<AccountingStore>,
 }
 
 /// Warum ein Paket stillschweigend verworfen wurde. RFC 2865 verlangt,
@@ -21,6 +24,8 @@ pub enum Drop {
     BadMessageAuthenticator,
     BadAccountingAuthenticator,
     MissingUserName,
+    /// RFC 2866: Antwort nur senden, wenn der Datensatz gespeichert werden konnte.
+    AccountingStorageFailed,
 }
 
 impl<A: Authenticator> Handler<A> {
@@ -52,7 +57,10 @@ impl<A: Authenticator> Handler<A> {
         };
 
         let resp = match result {
-            AuthResult::Accept { session_timeout, reply_message } => {
+            AuthResult::Accept {
+                session_timeout,
+                reply_message,
+            } => {
                 tracing::info!(user, "Access-Accept");
                 let mut p = Packet::new(Code::AccessAccept, req.identifier, [0; 16]);
                 if let Some(t) = session_timeout {
@@ -82,7 +90,7 @@ impl<A: Authenticator> Handler<A> {
         Ok(crypto::finalize_response(p, &req.authenticator, secret))
     }
 
-    pub fn handle_acct(&self, data: &[u8], secret: &[u8]) -> Result<Vec<u8>, Drop> {
+    pub fn handle_acct(&self, data: &[u8], secret: &[u8], nas_ip: &str) -> Result<Vec<u8>, Drop> {
         let req = Packet::decode(data).map_err(|_| Drop::Malformed)?;
         if req.code != Code::AccountingRequest {
             return Err(Drop::UnexpectedCode);
@@ -91,22 +99,25 @@ impl<A: Authenticator> Handler<A> {
             return Err(Drop::BadAccountingAuthenticator);
         }
 
-        let status = req.get(ACCT_STATUS_TYPE).and_then(|v| v.try_into().ok()).map(u32::from_be_bytes);
-        let status = match status {
-            Some(1) => "Start",
-            Some(2) => "Stop",
-            Some(3) => "Interim-Update",
-            Some(7) => "Accounting-On",
-            Some(8) => "Accounting-Off",
-            _ => "Unknown",
-        };
+        let record = Record::from_packet(&req, nas_ip).ok_or(Drop::Malformed)?;
         tracing::info!(
-            user = req.get_string(USER_NAME).unwrap_or_default(),
-            session = req.get_string(ACCT_SESSION_ID).unwrap_or_default(),
-            status,
+            user = record.user,
+            session = record.session_id,
+            nas = record.nas,
+            status = ?record.status,
             "Accounting"
         );
-        // TODO Meilenstein 4: Session in SQLite speichern.
+        if let StatusType::Unknown(x) = record.status {
+            tracing::warn!(status = x, "unbekannter Acct-Status-Type");
+        }
+
+        if let Some(store) = &self.accounting
+            && let Err(e) = store.record(&record)
+        {
+            // Keine Antwort: der NAS wiederholt den Request später, nichts geht verloren.
+            tracing::error!(error = %e, "Accounting konnte nicht gespeichert werden");
+            return Err(Drop::AccountingStorageFailed);
+        }
 
         let mut encoded = Packet::new(Code::AccountingResponse, req.identifier, [0; 16])
             .encode()

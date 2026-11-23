@@ -20,3 +20,8 @@ name = "martin"
 password_hash = "$argon2id$v=19$m=19456,t=2,p=1$c89DK+SklS7D7QBRNCv+Qw$4NDMdW4fifyal6XFx8ooneujy0iQmVa5l7mEbrO2kv4" # geheim123
 session_timeout = 3600
 reply_message = "Willkommen bei radius-rs"
+
+[accounting]
+# SQLite-Datenbank für Accounting-Sessions. Leer lassen ("") = nur ins Log schreiben.
+# Anzeigen mit:  cargo run -- sessions
+database = "accounting.db"

@@ -13,6 +13,25 @@ pub struct Config {
     pub clients: Vec<ClientConfig>,
     #[serde(default)]
     pub users: Vec<UserConfig>,
+    #[serde(default)]
+    pub accounting: AccountingConfig,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AccountingConfig {
+    /// Pfad zur SQLite-Datenbank. Leer = Accounting nur loggen.
+    #[serde(default = "default_db")]
+    pub database: String,
+}
+
+impl Default for AccountingConfig {
+    fn default() -> Self {
+        Self { database: default_db() }
+    }
+}
+
+fn default_db() -> String {
+    "accounting.db".into()
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -45,14 +64,26 @@ pub struct UserConfig {
     pub reply_message: Option<String>,
 }
 
-fn default_auth_addr() -> String { "0.0.0.0:1812".into() }
-fn default_acct_addr() -> String { "0.0.0.0:1813".into() }
-fn default_true() -> bool { true }
+fn default_auth_addr() -> String {
+    "0.0.0.0:1812".into()
+}
+fn default_acct_addr() -> String {
+    "0.0.0.0:1813".into()
+}
+fn default_true() -> bool {
+    true
+}
 
 impl Config {
     pub fn load(path: &Path) -> anyhow::Result<Self> {
-        let text = std::fs::read_to_string(path)?;
-        Ok(toml::from_str(&text)?)
+        use anyhow::Context;
+        let text = std::fs::read_to_string(path).with_context(|| {
+            format!(
+                "Konfiguration '{}' nicht gefunden oder nicht lesbar. Tipp: config.example.toml nach config.toml kopieren.",
+                path.display()
+            )
+        })?;
+        toml::from_str(&text).with_context(|| format!("Fehler in der Konfiguration '{}'", path.display()))
     }
 
     pub fn client_secrets(&self) -> HashMap<IpAddr, ClientConfig> {

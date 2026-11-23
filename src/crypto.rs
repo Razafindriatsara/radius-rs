@@ -11,7 +11,7 @@ use hmac::{Hmac, KeyInit, Mac};
 use md5::{Digest, Md5};
 
 use crate::attributes::MESSAGE_AUTHENTICATOR;
-use crate::packet::{Packet, HEADER_LEN};
+use crate::packet::{HEADER_LEN, Packet};
 
 type HmacMd5 = Hmac<Md5>;
 
@@ -99,7 +99,13 @@ pub fn verify_message_authenticator(encoded: &[u8], secret: &[u8]) -> bool {
 pub fn finalize_response(mut response: Packet, request_auth: &[u8; 16], secret: &[u8]) -> Vec<u8> {
     response.attributes.retain(|a| a.typ != MESSAGE_AUTHENTICATOR);
     // RFC 3579 / BlastRADIUS-Empfehlung: Message-Authenticator als erstes Attribut.
-    response.attributes.insert(0, crate::packet::Attribute { typ: MESSAGE_AUTHENTICATOR, value: vec![0u8; 16] });
+    response.attributes.insert(
+        0,
+        crate::packet::Attribute {
+            typ: MESSAGE_AUTHENTICATOR,
+            value: vec![0u8; 16],
+        },
+    );
 
     let mut encoded = response.encode().expect("Antwortpaket zu groß");
     let ma = compute_message_authenticator(&encoded, secret, Some(request_auth)).expect("Attribut fehlt");
@@ -121,6 +127,13 @@ pub fn sign_request_message_authenticator(encoded: &mut [u8], secret: &[u8]) -> 
     };
     encoded[off + 2..off + 18].copy_from_slice(&ma);
     true
+}
+
+/// Client-Seite: setzt den Request Authenticator eines enkodierten Accounting-Requests.
+pub fn sign_accounting_request(encoded: &mut [u8], secret: &[u8]) {
+    encoded[4..20].fill(0);
+    let digest = Md5::new().chain_update(&*encoded).chain_update(secret).finalize();
+    encoded[4..20].copy_from_slice(&digest);
 }
 
 /// Accounting-Request Authenticator (RFC 2866 Abschnitt 3):
@@ -155,7 +168,9 @@ mod tests {
     use crate::packet::Packet;
 
     fn hex(s: &str) -> Vec<u8> {
-        s.split_whitespace().map(|b| u8::from_str_radix(b, 16).unwrap()).collect()
+        s.split_whitespace()
+            .map(|b| u8::from_str_radix(b, 16).unwrap())
+            .collect()
     }
 
     /// Beispiel aus RFC 2865 Abschnitt 7.1: Benutzer "nemo", Passwort "arctangent",

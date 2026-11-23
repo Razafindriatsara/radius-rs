@@ -2,6 +2,8 @@
 //!
 //! Module:
 //! - [`packet`]     Codec für RADIUS-Pakete und Attribute (TLV)
+//! - [`accounting`] Speicherung der Accounting-Sessions in SQLite
+//! - [`dedup`]      Erkennung doppelter Requests (RFC 5080)
 //! - [`attributes`] Dictionary der unterstützten Attribut-Typen
 //! - [`crypto`]     PAP-Passwortverschlüsselung, Authenticators, Message-Authenticator
 //! - [`config`]     Konfiguration (Clients/Shared Secrets, Benutzer)
@@ -9,10 +11,12 @@
 //! - [`handler`]    Protokoll-Logik: Request rein, Response raus
 //! - [`server`]     Async-UDP-Server (tokio)
 
+pub mod accounting;
 pub mod attributes;
 pub mod auth;
 pub mod config;
 pub mod crypto;
+pub mod dedup;
 pub mod handler;
 pub mod packet;
 pub mod server;

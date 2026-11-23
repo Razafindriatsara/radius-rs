@@ -2,6 +2,9 @@
 name = "radius-rs"
 version = "0.1.0"
 edition = "2024"
+description = "Schlanker, sicherheitsorientierter RADIUS-Server (RFC 2865/2866) in Rust"
+license = "MIT"
+repository = "https://github.com/Razafindriatsara/radius-rs"
 default-run = "radius-rs"
 
 [dependencies]
@@ -9,6 +12,7 @@ anyhow = "1.0.105"
 argon2 = "0.6.0"
 hmac = "0.13.0"
 md-5 = "0.11.0"
+rusqlite = { version = "0.43.0", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }
 thiserror = "2.0.21"
 tokio = { version = "1.54.1", features = ["net", "rt-multi-thread", "macros", "signal", "time"] }

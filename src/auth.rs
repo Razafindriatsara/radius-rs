@@ -13,7 +13,10 @@ use crate::config::UserConfig;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthResult {
-    Accept { session_timeout: Option<u32>, reply_message: Option<String> },
+    Accept {
+        session_timeout: Option<u32>,
+        reply_message: Option<String>,
+    },
     Reject,
 }
 
@@ -27,7 +30,9 @@ pub struct StaticUsers {
 
 impl StaticUsers {
     pub fn new(users: Vec<UserConfig>) -> Self {
-        Self { users: users.into_iter().map(|u| (u.name.clone(), u)).collect() }
+        Self {
+            users: users.into_iter().map(|u| (u.name.clone(), u)).collect(),
+        }
     }
 }
 
@@ -41,7 +46,10 @@ impl Authenticator for StaticUsers {
             return AuthResult::Reject;
         };
         if Argon2::default().verify_password(password, &hash).is_ok() {
-            AuthResult::Accept { session_timeout: u.session_timeout, reply_message: u.reply_message.clone() }
+            AuthResult::Accept {
+                session_timeout: u.session_timeout,
+                reply_message: u.reply_message.clone(),
+            }
         } else {
             AuthResult::Reject
         }
@@ -69,7 +77,10 @@ mod tests {
             session_timeout: Some(3600),
             reply_message: None,
         }]);
-        assert!(matches!(users.authenticate_pap("martin", b"geheim123"), AuthResult::Accept { .. }));
+        assert!(matches!(
+            users.authenticate_pap("martin", b"geheim123"),
+            AuthResult::Accept { .. }
+        ));
         assert_eq!(users.authenticate_pap("martin", b"falsch"), AuthResult::Reject);
         assert_eq!(users.authenticate_pap("niemand", b"geheim123"), AuthResult::Reject);
     }

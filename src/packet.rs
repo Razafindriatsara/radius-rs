@@ -97,7 +97,12 @@ pub enum EncodeError {
 
 impl Packet {
     pub fn new(code: Code, identifier: u8, authenticator: [u8; 16]) -> Self {
-        Self { code, identifier, authenticator, attributes: Vec::new() }
+        Self {
+            code,
+            identifier,
+            authenticator,
+            attributes: Vec::new(),
+        }
     }
 
     /// Dekodiert ein Datagramm. Bytes hinter `Length` werden laut RFC 2865 ignoriert.
@@ -107,7 +112,10 @@ impl Packet {
         }
         let length = u16::from_be_bytes([buf[2], buf[3]]) as usize;
         if !(MIN_PACKET_LEN..=MAX_PACKET_LEN).contains(&length) || length > buf.len() {
-            return Err(DecodeError::BadLength { field: length, actual: buf.len() });
+            return Err(DecodeError::BadLength {
+                field: length,
+                actual: buf.len(),
+            });
         }
 
         let mut authenticator = [0u8; 16];
@@ -124,11 +132,19 @@ impl Packet {
             if len < 2 || offset + len > length {
                 return Err(DecodeError::BadAttribute { offset, len });
             }
-            attributes.push(Attribute { typ, value: buf[offset + 2..offset + len].to_vec() });
+            attributes.push(Attribute {
+                typ,
+                value: buf[offset + 2..offset + len].to_vec(),
+            });
             offset += len;
         }
 
-        Ok(Self { code: buf[0].into(), identifier: buf[1], authenticator, attributes })
+        Ok(Self {
+            code: buf[0].into(),
+            identifier: buf[1],
+            authenticator,
+            attributes,
+        })
     }
 
     pub fn encode(&self) -> Result<Vec<u8>, EncodeError> {
@@ -155,7 +171,10 @@ impl Packet {
     }
 
     pub fn get(&self, typ: u8) -> Option<&[u8]> {
-        self.attributes.iter().find(|a| a.typ == typ).map(|a| a.value.as_slice())
+        self.attributes
+            .iter()
+            .find(|a| a.typ == typ)
+            .map(|a| a.value.as_slice())
     }
 
     pub fn get_string(&self, typ: u8) -> Option<String> {
@@ -163,7 +182,10 @@ impl Packet {
     }
 
     pub fn add(&mut self, typ: u8, value: impl Into<Vec<u8>>) {
-        self.attributes.push(Attribute { typ, value: value.into() });
+        self.attributes.push(Attribute {
+            typ,
+            value: value.into(),
+        });
     }
 
     pub fn add_u32(&mut self, typ: u8, value: u32) {
