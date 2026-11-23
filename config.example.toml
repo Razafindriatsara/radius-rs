@@ -1,0 +1,22 @@
+# radius-rs Beispielkonfiguration
+# Kopieren nach config.toml und Secrets/Passwörter ändern.
+
+[server]
+auth_listen = "0.0.0.0:1812"
+acct_listen = "0.0.0.0:1813"
+# Access-Requests ohne gültigen Message-Authenticator verwerfen (Schutz vor BlastRADIUS, CVE-2024-3596).
+# Für Tests mit `radtest` auf false setzen oder radclient mit Message-Authenticator nutzen.
+require_message_authenticator = true
+
+# NAS-Clients (Access Points, Switches, VPN-Gateways), die Anfragen schicken dürfen.
+[[clients]]
+name = "localhost"
+address = "127.0.0.1"
+secret = "testing123"
+
+# Benutzer. Hash erzeugen mit:  cargo run -- hash-password <passwort>
+[[users]]
+name = "martin"
+password_hash = "$argon2id$v=19$m=19456,t=2,p=1$c89DK+SklS7D7QBRNCv+Qw$4NDMdW4fifyal6XFx8ooneujy0iQmVa5l7mEbrO2kv4" # geheim123
+session_timeout = 3600
+reply_message = "Willkommen bei radius-rs"

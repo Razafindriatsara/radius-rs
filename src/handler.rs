@@ -1,0 +1,117 @@
+//! Protokoll-Logik, unabhängig vom Netzwerk und damit gut testbar:
+//! Bytes eines Requests rein, Bytes einer Antwort (oder nichts) raus.
+
+use crate::attributes::*;
+use crate::auth::{AuthResult, Authenticator};
+use crate::crypto;
+use crate::packet::{Code, Packet};
+
+pub struct Handler<A: Authenticator> {
+    pub auth: A,
+    pub require_message_authenticator: bool,
+}
+
+/// Warum ein Paket stillschweigend verworfen wurde. RFC 2865 verlangt,
+/// ungültige Pakete ohne Antwort zu verwerfen.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Drop {
+    Malformed,
+    UnexpectedCode,
+    MissingMessageAuthenticator,
+    BadMessageAuthenticator,
+    BadAccountingAuthenticator,
+    MissingUserName,
+}
+
+impl<A: Authenticator> Handler<A> {
+    pub fn handle_auth(&self, data: &[u8], secret: &[u8]) -> Result<Vec<u8>, Drop> {
+        let req = Packet::decode(data).map_err(|_| Drop::Malformed)?;
+
+        match req.code {
+            Code::AccessRequest => {}
+            Code::StatusServer => return self.status_server(&req, data, secret),
+            _ => return Err(Drop::UnexpectedCode),
+        }
+
+        let has_ma = req.get(MESSAGE_AUTHENTICATOR).is_some();
+        if has_ma && !crypto::verify_message_authenticator(data, secret) {
+            return Err(Drop::BadMessageAuthenticator);
+        }
+        if !has_ma && (self.require_message_authenticator || req.get(EAP_MESSAGE).is_some()) {
+            return Err(Drop::MissingMessageAuthenticator);
+        }
+
+        let user = req.get_string(USER_NAME).ok_or(Drop::MissingUserName)?;
+
+        let result = match req.get(USER_PASSWORD) {
+            Some(cipher) => match crypto::decrypt_user_password(cipher, secret, &req.authenticator) {
+                Some(pw) => self.auth.authenticate_pap(&user, &pw),
+                None => AuthResult::Reject,
+            },
+            None => AuthResult::Reject, // CHAP/EAP noch nicht unterstützt
+        };
+
+        let resp = match result {
+            AuthResult::Accept { session_timeout, reply_message } => {
+                tracing::info!(user, "Access-Accept");
+                let mut p = Packet::new(Code::AccessAccept, req.identifier, [0; 16]);
+                if let Some(t) = session_timeout {
+                    p.add_u32(SESSION_TIMEOUT, t);
+                }
+                if let Some(m) = reply_message {
+                    p.add(REPLY_MESSAGE, m.into_bytes());
+                }
+                p
+            }
+            AuthResult::Reject => {
+                tracing::info!(user, "Access-Reject");
+                Packet::new(Code::AccessReject, req.identifier, [0; 16])
+            }
+        };
+
+        Ok(crypto::finalize_response(resp, &req.authenticator, secret))
+    }
+
+    /// RFC 5997: Status-Server muss einen gültigen Message-Authenticator haben.
+    fn status_server(&self, req: &Packet, data: &[u8], secret: &[u8]) -> Result<Vec<u8>, Drop> {
+        if !crypto::verify_message_authenticator(data, secret) {
+            return Err(Drop::BadMessageAuthenticator);
+        }
+        let mut p = Packet::new(Code::AccessAccept, req.identifier, [0; 16]);
+        p.add(REPLY_MESSAGE, b"radius-rs alive".to_vec());
+        Ok(crypto::finalize_response(p, &req.authenticator, secret))
+    }
+
+    pub fn handle_acct(&self, data: &[u8], secret: &[u8]) -> Result<Vec<u8>, Drop> {
+        let req = Packet::decode(data).map_err(|_| Drop::Malformed)?;
+        if req.code != Code::AccountingRequest {
+            return Err(Drop::UnexpectedCode);
+        }
+        if !crypto::verify_accounting_request(data, secret) {
+            return Err(Drop::BadAccountingAuthenticator);
+        }
+
+        let status = req.get(ACCT_STATUS_TYPE).and_then(|v| v.try_into().ok()).map(u32::from_be_bytes);
+        let status = match status {
+            Some(1) => "Start",
+            Some(2) => "Stop",
+            Some(3) => "Interim-Update",
+            Some(7) => "Accounting-On",
+            Some(8) => "Accounting-Off",
+            _ => "Unknown",
+        };
+        tracing::info!(
+            user = req.get_string(USER_NAME).unwrap_or_default(),
+            session = req.get_string(ACCT_SESSION_ID).unwrap_or_default(),
+            status,
+            "Accounting"
+        );
+        // TODO Meilenstein 4: Session in SQLite speichern.
+
+        let mut encoded = Packet::new(Code::AccountingResponse, req.identifier, [0; 16])
+            .encode()
+            .map_err(|_| Drop::Malformed)?;
+        crypto::sign_response(&mut encoded, &req.authenticator, secret);
+        Ok(encoded)
+    }
+}
