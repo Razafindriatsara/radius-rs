@@ -40,23 +40,30 @@ pub async fn serve<A: Authenticator + 'static>(
         let socket = socket.clone();
         let handler = handler.clone();
         tokio::spawn(async move {
-            respond(&socket, peer, &data, &client, service, &handler).await;
+            respond(&socket, peer, data, client, service, handler).await;
         });
     }
 }
 
-async fn respond<A: Authenticator>(
+async fn respond<A: Authenticator + 'static>(
     socket: &UdpSocket,
     peer: SocketAddr,
-    data: &[u8],
-    client: &ClientConfig,
+    data: Vec<u8>,
+    client: ClientConfig,
     service: Service,
-    handler: &Handler<A>,
+    handler: Arc<Handler<A>>,
 ) {
-    let secret = client.secret.as_bytes();
-    let result = match service {
-        Service::Auth => handler.handle_auth(data, secret),
-        Service::Acct => handler.handle_acct(data, secret),
+    // Argon2 ist absichtlich rechenintensiv. Damit es die Async-Worker nicht blockiert,
+    // läuft die Protokoll-Logik im Blocking-Threadpool von tokio.
+    let secret = client.secret.clone();
+    let result = tokio::task::spawn_blocking(move || match service {
+        Service::Auth => handler.handle_auth(&data, secret.as_bytes()),
+        Service::Acct => handler.handle_acct(&data, secret.as_bytes()),
+    })
+    .await;
+    let Ok(result) = result else {
+        tracing::error!(%peer, "Handler-Task abgebrochen");
+        return;
     };
     match result {
         Ok(resp) => {

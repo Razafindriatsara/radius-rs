@@ -50,14 +50,24 @@ async fn start_server(addr: &str) {
     tokio::time::sleep(Duration::from_millis(100)).await;
 }
 
-async fn send(server: &str, data: &[u8]) -> Option<Vec<u8>> {
+async fn send_wait(server: &str, data: &[u8], wait_ms: u64) -> Option<Vec<u8>> {
     let sock = UdpSocket::bind("127.0.0.1:0").await.unwrap();
     sock.send_to(data, server).await.unwrap();
     let mut buf = [0u8; 4096];
-    match tokio::time::timeout(Duration::from_millis(500), sock.recv(&mut buf)).await {
+    match tokio::time::timeout(Duration::from_millis(wait_ms), sock.recv(&mut buf)).await {
         Ok(Ok(n)) => Some(buf[..n].to_vec()),
         _ => None,
     }
+}
+
+/// Antwort erwartet: großzügiges Timeout, damit langsame Rechner nicht scheitern.
+async fn send(server: &str, data: &[u8]) -> Option<Vec<u8>> {
+    send_wait(server, data, 5000).await
+}
+
+/// Verwerfen erwartet: kurzes Timeout reicht.
+async fn send_expect_drop(server: &str, data: &[u8]) -> bool {
+    send_wait(server, data, 500).await.is_none()
 }
 
 /// Prüft den Response Authenticator so, wie ein NAS es tut.
@@ -89,10 +99,10 @@ async fn accept_reject_and_drop() {
 
     // Ohne Message-Authenticator -> stillschweigend verworfen (BlastRADIUS-Schutz)
     let (req, _) = build_request(3, "martin", "geheim123", false);
-    assert!(send(server, &req).await.is_none());
+    assert!(send_expect_drop(server, &req).await);
 
     // Müll -> verworfen, Server läuft weiter
-    assert!(send(server, &[0xff; 7]).await.is_none());
+    assert!(send_expect_drop(server, &[0xff; 7]).await);
     let (req, _) = build_request(4, "martin", "geheim123", true);
     assert!(send(server, &req).await.is_some());
 }

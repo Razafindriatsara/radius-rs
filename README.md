@@ -14,6 +14,8 @@ Implementiert Authentifizierung (RFC 2865), Accounting (RFC 2866), Message-Authe
 - [x] Status-Server für Health Checks
 - [x] Accounting-Requests (Start/Stop/Interim) prüfen und beantworten
 - [x] Pro-Client Shared Secrets, unbekannte Clients werden verworfen
+- [x] Eigener Testclient `radius-client`, der Antworten kryptografisch prüft
+- [x] Argon2 läuft im Blocking-Threadpool und bremst den Async-Server nicht aus
 - [x] Property-Tests: der Parser panickt bei keiner Eingabe
 - [ ] Accounting-Sessions in SQLite speichern
 - [ ] Duplikaterkennung (Identifier-Cache) und Rate Limiting
@@ -44,6 +46,23 @@ NAS ──────────────────────► server
 cp config.example.toml config.toml
 cargo run --release -- config.toml
 ```
+
+### Testclient (Linux, macOS, Windows/PowerShell)
+
+Im Projekt ist ein eigener Client enthalten. Er prüft auch Response Authenticator und Message-Authenticator der Antwort.
+
+```powershell
+# Terminal 1
+cargo run -- config.toml
+
+# Terminal 2
+cargo run --bin radius-client -- martin geheim123     # Access-Accept, Exit-Code 0
+cargo run --bin radius-client -- martin falsch        # Access-Reject, Exit-Code 1
+cargo run --bin radius-client -- status               # Status-Server
+cargo run --bin radius-client -- martin geheim123 192.168.1.10:1812 meinSecret
+```
+
+### Mit FreeRADIUS-Werkzeugen
 
 Test mit FreeRADIUS-Werkzeugen (`sudo apt install freeradius-utils`):
 
