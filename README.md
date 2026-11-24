@@ -1,6 +1,7 @@
 # radius-rs
 
 [![CI](https://github.com/Razafindriatsara/radius-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/Razafindriatsara/radius-rs/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Razafindriatsara/radius-rs)](https://github.com/Razafindriatsara/radius-rs/releases/latest)
 ![Rust](https://img.shields.io/badge/rust-2024-orange)
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
 
@@ -29,6 +30,7 @@ RADIUS ist das Protokoll, mit dem Access Points, Switches und VPN-Gateways (der 
 - [x] 28 automatische Tests, darunter Testvektoren aus RFC 2865 und Property-Tests
 - [x] **Interoperabilität mit FreeRADIUS**: 15 Tests mit `radclient` laufen bei jedem Push
 - [x] **Docker-Image** (121 MB, läuft ohne Root) und Compose-Demo mit Health Check
+- [x] **Automatische Releases**: Programme für Linux (x86_64, ARM64), Windows und macOS sowie Multi-Arch-Docker-Image auf ghcr.io
 - [x] CI auf GitHub Actions: Tests auf drei Betriebssystemen, FreeRADIUS-Interop, Docker-Build, `rustfmt`, `clippy -D warnings`, `shellcheck`
 
 ### Mögliche Erweiterungen
@@ -55,6 +57,44 @@ NAS ─────────────────────────�
 ```
 
 `handler.rs` arbeitet nur mit Bytes rein und Bytes raus. Dadurch lässt sich die gesamte Protokoll-Logik ohne Sockets testen. Das Benutzer-Backend steckt hinter dem Trait `Authenticator` und lässt sich gegen SQL oder LDAP austauschen.
+
+## Installation
+
+**Fertige Programme:** Auf der Seite [Releases](https://github.com/Razafindriatsara/radius-rs/releases/latest) das Archiv für dein System herunterladen:
+
+| System | Datei |
+|---|---|
+| Linux x86_64 | `radius-rs-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz` |
+| Linux ARM64 (z.B. Raspberry Pi 4/5 mit 64-Bit-OS) | `radius-rs-vX.Y.Z-aarch64-unknown-linux-gnu.tar.gz` |
+| Windows | `radius-rs-vX.Y.Z-x86_64-pc-windows-msvc.zip` |
+| macOS (Apple Silicon) | `radius-rs-vX.Y.Z-aarch64-apple-darwin.tar.gz` |
+
+```bash
+sha256sum -c radius-rs-v0.1.0-x86_64-unknown-linux-gnu.tar.gz.sha256   # Prüfsumme kontrollieren
+tar xzf radius-rs-v0.1.0-x86_64-unknown-linux-gnu.tar.gz
+cd radius-rs-v0.1.0-x86_64-unknown-linux-gnu
+cp config.example.toml config.toml
+./radius-rs config.toml
+```
+
+**Docker-Image** (linux/amd64 und linux/arm64):
+
+```bash
+docker run --rm -p 1812:1812/udp -p 1813:1813/udp ghcr.io/razafindriatsara/radius-rs:latest
+```
+
+**Aus dem Quellcode:** siehe „Schnellstart ohne Docker“.
+
+### Neue Version veröffentlichen
+
+Version in `Cargo.toml` und `CHANGELOG.md` anpassen, committen, dann:
+
+```bash
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+Der Workflow `release.yml` baut die Programme für alle vier Plattformen, legt das GitHub Release mit Prüfsummen an und veröffentlicht das Docker-Image. Passt das Tag nicht zur Version in `Cargo.toml`, bricht er ab.
 
 ## Schnellstart mit Docker
 

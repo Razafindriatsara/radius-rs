@@ -13,7 +13,8 @@ radius-rs: RADIUS-Server
 Aufruf:
   radius-rs [config.toml]                 Server starten
   radius-rs hash-password <passwort>      Argon2-Hash für die Konfiguration erzeugen
-  radius-rs sessions [config.toml] [n]    Die letzten n Accounting-Sessions anzeigen (Standard 20)";
+  radius-rs sessions [config.toml] [n]    Die letzten n Accounting-Sessions anzeigen (Standard 20)
+  radius-rs --version                     Version anzeigen";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -23,6 +24,10 @@ async fn main() -> anyhow::Result<()> {
 
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
+        Some("-V" | "--version") => {
+            println!("radius-rs {}", env!("CARGO_PKG_VERSION"));
+            Ok(())
+        }
         Some("-h" | "--help" | "help") => {
             println!("{USAGE}");
             Ok(())

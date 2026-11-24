@@ -49,6 +49,10 @@ fn main() {
 fn run() -> anyhow::Result<bool> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let a: Vec<&str> = args.iter().map(String::as_str).collect();
+    if matches!(a.first(), Some(&("-V" | "--version"))) {
+        println!("radius-client {}", env!("CARGO_PKG_VERSION"));
+        return Ok(true);
+    }
 
     let (mode, rest) = match a.as_slice() {
         ["status", rest @ ..] => (Mode::Status, rest),
