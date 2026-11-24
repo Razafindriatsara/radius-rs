@@ -8,7 +8,7 @@ Ein schlanker, sicherheitsorientierter RADIUS-Server in Rust.
 Er implementiert Authentifizierung (RFC 2865), Accounting (RFC 2866), Message-Authenticator (RFC 3579), Status-Server (RFC 5997) und die Erkennung doppelter Requests (RFC 5080).
 
 > Portfolioprojekt: Netzwerkprotokoll nach RFC, binäres Paketformat, Protokoll-Kryptografie, Async-Rust, SQLite.
-> Getestet unter Linux, Windows und macOS.
+> Getestet unter Linux, Windows und macOS sowie gegen `radclient` von FreeRADIUS.
 
 ## Was ist RADIUS?
 
@@ -23,11 +23,13 @@ RADIUS ist das Protokoll, mit dem Access Points, Switches und VPN-Gateways (der 
 - [x] **Accounting in SQLite**: Start, Interim-Update, Stop, Accounting-On/Off, 64-Bit-Zähler über Gigawords
 - [x] **Erkennung doppelter Requests**: Wiederholungen bekommen die gespeicherte Antwort, ohne erneute Prüfung
 - [x] Status-Server für Health Checks
-- [x] Pro-Client Shared Secrets, unbekannte Clients werden verworfen
+- [x] Pro-Client Shared Secrets, Clients als einzelne IP oder Netz (CIDR, IPv4/IPv6), unbekannte Clients werden verworfen
 - [x] Argon2 und SQLite laufen im Blocking-Threadpool und bremsen den Async-Server nicht aus
 - [x] Eigener Testclient `radius-client`, der Antworten kryptografisch prüft
-- [x] 22 automatische Tests, darunter Testvektoren aus RFC 2865 und Property-Tests
-- [x] CI auf GitHub Actions: Tests auf drei Betriebssystemen, `rustfmt`, `clippy -D warnings`
+- [x] 28 automatische Tests, darunter Testvektoren aus RFC 2865 und Property-Tests
+- [x] **Interoperabilität mit FreeRADIUS**: 15 Tests mit `radclient` laufen bei jedem Push
+- [x] **Docker-Image** (121 MB, läuft ohne Root) und Compose-Demo mit Health Check
+- [x] CI auf GitHub Actions: Tests auf drei Betriebssystemen, FreeRADIUS-Interop, Docker-Build, `rustfmt`, `clippy -D warnings`, `shellcheck`
 
 ### Mögliche Erweiterungen
 
@@ -35,6 +37,7 @@ RADIUS ist das Protokoll, mit dem Access Points, Switches und VPN-Gateways (der 
 - [ ] EAP (PEAP/EAP-TLS) für WPA2-Enterprise
 - [ ] CoA/Disconnect (RFC 5176), um aktive Sessions zu trennen
 - [ ] Prometheus-Metriken
+- [ ] Demo mit echter Hardware (OpenWrt-Hotspot)
 - [ ] Fuzzing mit `cargo-fuzz`
 
 ## Architektur
@@ -53,7 +56,19 @@ NAS ─────────────────────────�
 
 `handler.rs` arbeitet nur mit Bytes rein und Bytes raus. Dadurch lässt sich die gesamte Protokoll-Logik ohne Sockets testen. Das Benutzer-Backend steckt hinter dem Trait `Authenticator` und lässt sich gegen SQL oder LDAP austauschen.
 
-## Schnellstart
+## Schnellstart mit Docker
+
+```bash
+docker compose up -d radius        # Server bauen und starten (Ports 1812/1813 UDP)
+docker compose run --rm demo       # Demo: Anmeldung, Ablehnung, Accounting
+docker compose exec radius radius-rs sessions /etc/radius-rs/config.toml
+docker compose down                # stoppen
+```
+
+Das Image bringt eine Demo-Konfiguration mit (Benutzer `martin` / `geheim123`, Secret `testing123`).
+Für den echten Betrieb eine eigene `config.toml` einbinden, siehe Kommentar in `docker-compose.yml`.
+
+## Schnellstart ohne Docker
 
 ```bash
 cp config.example.toml config.toml     # PowerShell: Copy-Item config.example.toml config.toml
@@ -96,11 +111,30 @@ sess-002       martin       radius-client  aktiv      0:00:00          0 B      
 ### Mit FreeRADIUS-Werkzeugen
 
 ```bash
-echo -e 'User-Name=martin\nUser-Password=geheim123\nMessage-Authenticator=0x00' \
+sudo apt install freeradius-utils
+
+printf 'User-Name = "martin"\nUser-Password = "geheim123"\nMessage-Authenticator = 0x00\n' \
   | radclient -x 127.0.0.1:1812 auth testing123
 ```
 
-Für das ältere `radtest` (ohne Message-Authenticator) in der Konfiguration `require_message_authenticator = false` setzen. Mit Wireshark (Filter `radius`) lassen sich die Pakete dekodiert ansehen.
+Ausgabe:
+
+```
+Received Access-Accept Id 235 from 127.0.0.1:1812 to 127.0.0.1:37412 length 70
+	Message-Authenticator = 0x9aca9315c3c6a78f34a2058d4c4e9349
+	Session-Timeout = 3600
+	Reply-Message = "Willkommen bei radius-rs"
+```
+
+Für das ältere `radtest` (ohne Message-Authenticator) in der Konfiguration `require_message_authenticator = false` setzen. Mit Wireshark oder `tshark -i lo -f "udp port 1812"` lassen sich die Pakete dekodiert ansehen.
+
+### Interoperabilitätstest
+
+`scripts/interop-freeradius.sh` startet einen Server mit Testkonfiguration und prüft ihn mit `radclient` von FreeRADIUS: Accept, Reject, lange Passwörter über mehrere MD5-Blöcke, Message-Authenticator, falsches Secret, Status-Server und den vollständigen Accounting-Ablauf bis zur gespeicherten Session. Läuft in der CI bei jedem Push, einmal gegen das Binary und einmal gegen den Docker-Container.
+
+```bash
+./scripts/interop-freeradius.sh
+```
 
 ## Tests
 
@@ -115,7 +149,9 @@ cargo test
 | `auth` | Argon2: richtiges und falsches Passwort, unbekannter Benutzer |
 | `accounting` | Lebenszyklus einer Session, Stop ohne Start, Accounting-Off, Zähler über 4 GiB |
 | `dedup` | Neu, in Bearbeitung, gespeichert, Ablauf, Speichergrenze |
-| End-to-End | Echtes UDP: Accept, Reject, Verwerfen, Duplikat (Passwort wird nur einmal geprüft), Accounting landet in der DB |
+| `net`, `config` | CIDR für IPv4/IPv6, IPv4-mapped IPv6, spezifischster Client gewinnt, ungültige Adressen |
+| End-to-End | Echtes UDP: Accept, Reject, Verwerfen ohne Message-Authenticator, Duplikat (Passwort wird nur einmal geprüft), Accounting landet in der DB |
+| Interop | 15 Tests mit `radclient` (FreeRADIUS 3.2), gegen Binary und Docker-Container |
 
 ## Design-Entscheidungen
 
@@ -125,6 +161,8 @@ cargo test
 - **Warum ein Duplikat-Cache?** Geht eine Antwort verloren, wiederholt der NAS den Request. Ohne Cache würde Accounting doppelt gezählt und Argon2 unnötig CPU verbrauchen. Schlüssel ist (IP, Port, Identifier, Request Authenticator), wie RFC 5080 empfiehlt. Der Cache ist in der Größe begrenzt, damit eine Flut von Requests keinen Speicher frisst.
 - **Warum keine Antwort, wenn die Datenbank ausfällt?** RFC 2866: Der Server bestätigt Accounting erst, wenn es gespeichert ist. Ohne Antwort wiederholt der NAS den Request später, und nichts geht verloren.
 - **Warum `spawn_blocking`?** Argon2 ist absichtlich rechenintensiv, SQLite blockiert. Beides würde sonst die Async-Worker von tokio anhalten.
+- **Warum zusätzlich gegen FreeRADIUS testen?** Tests mit dem eigenen Client beweisen nur, dass Client und Server sich einig sind, nicht dass beide das Protokoll richtig umsetzen. `radclient` ist eine unabhängige, weit verbreitete Implementierung.
+- **Warum CIDR für Clients?** In Container-Netzen und größeren Installationen ändern sich NAS-IPs. FreeRADIUS erlaubt deshalb Netze, und der spezifischste Eintrag gewinnt.
 - **Konstanter Zeitvergleich** bei Authenticators, damit Timing nichts verrät.
 
 ## Referenzen

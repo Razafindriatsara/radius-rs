@@ -8,6 +8,7 @@
 //! - [`crypto`]     PAP-Passwortverschlüsselung, Authenticators, Message-Authenticator
 //! - [`config`]     Konfiguration (Clients/Shared Secrets, Benutzer)
 //! - [`auth`]       Authentifizierungs-Backend
+//! - [`net`]        IP-Netze (CIDR) für die Zuordnung von NAS-Clients
 //! - [`handler`]    Protokoll-Logik: Request rein, Response raus
 //! - [`server`]     Async-UDP-Server (tokio)
 
@@ -18,5 +19,6 @@ pub mod config;
 pub mod crypto;
 pub mod dedup;
 pub mod handler;
+pub mod net;
 pub mod packet;
 pub mod server;

@@ -39,3 +39,38 @@ jobs:
         run: cargo fmt --check
       - name: clippy
         run: cargo clippy --all-targets -- -D warnings
+      - name: shellcheck
+        run: shellcheck scripts/*.sh
+
+  interop:
+    name: Interop mit FreeRADIUS (radclient)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: radclient installieren
+        run: sudo apt-get update && sudo apt-get install -y freeradius-utils
+      - name: Interop-Tests
+        run: ./scripts/interop-freeradius.sh
+
+  docker:
+    name: Docker-Image & Compose-Demo
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: radclient installieren
+        run: sudo apt-get update && sudo apt-get install -y freeradius-utils
+      - name: Image bauen
+        run: docker compose build
+      - name: Server starten (wartet auf Health Check)
+        run: docker compose up -d --wait radius
+      - name: Demo-Client
+        run: docker compose run --rm demo
+      - name: radclient gegen den Container
+        run: SERVER=127.0.0.1 AUTH_PORT=1812 ACCT_PORT=1813 SKIP_START=1 ./scripts/interop-freeradius.sh
+      - name: Logs und Aufräumen
+        if: always()
+        run: |
+          docker compose logs radius
+          docker compose down -v

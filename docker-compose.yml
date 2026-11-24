@@ -1,0 +1,44 @@
+# Server starten:            docker compose up -d radius
+# Demo-Client ausführen:     docker compose run --rm demo
+# Sessions anzeigen:         docker compose exec radius radius-rs sessions /etc/radius-rs/config.toml
+# Logs:                      docker compose logs -f radius
+services:
+  radius:
+    build: .
+    image: radius-rs:latest
+    ports:
+      - "1812:1812/udp"
+      - "1813:1813/udp"
+    volumes:
+      - radius-data:/data
+      # Eigene Konfiguration statt der Demo-Konfiguration:
+      # - ./config.toml:/etc/radius-rs/config.toml:ro
+    healthcheck:
+      # Status-Server (RFC 5997) mit dem mitgelieferten Testclient
+      test: ["CMD", "radius-client", "status", "127.0.0.1:1812", "testing123"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 3s
+    restart: unless-stopped
+
+  demo:
+    image: radius-rs:latest
+    profiles: ["demo"]
+    depends_on:
+      radius:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        echo "== Anmeldung mit richtigem Passwort"
+        radius-client martin geheim123 radius:1812
+        echo; echo "== Anmeldung mit falschem Passwort"
+        radius-client martin falsch radius:1812 || true
+        echo; echo "== Accounting"
+        radius-client acct start martin demo-session radius:1813
+        radius-client acct stop  martin demo-session radius:1813
+
+volumes:
+  radius-data:

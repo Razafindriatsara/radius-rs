@@ -17,7 +17,9 @@ Aufruf:
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt().with_target(false).init();
+    // Farben nur im Terminal, nicht in Docker-Logs oder Dateien
+    let ansi = std::io::IsTerminal::is_terminal(&std::io::stdout());
+    tracing_subscriber::fmt().with_target(false).with_ansi(ansi).init();
 
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
@@ -57,7 +59,7 @@ async fn run_server(path: PathBuf) -> anyhow::Result<()> {
         Some(AccountingStore::open(Path::new(&config.accounting.database))?)
     };
 
-    let clients = Arc::new(config.client_secrets());
+    let clients = Arc::new(config.client_list());
     let handler = Arc::new(Handler {
         auth: StaticUsers::new(config.users.clone()),
         require_message_authenticator: config.server.require_message_authenticator,

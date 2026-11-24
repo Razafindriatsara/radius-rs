@@ -1,14 +1,13 @@
 //! Async-UDP-Server. Jeder Port (Auth 1812, Accounting 1813) läuft in einer eigenen Task.
 
-use std::collections::HashMap;
-use std::net::{IpAddr, SocketAddr};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::net::UdpSocket;
 
 use crate::auth::Authenticator;
-use crate::config::ClientConfig;
+use crate::config::{ClientConfig, Clients};
 use crate::dedup::{DedupCache, Key, Lookup};
 use crate::handler::Handler;
 use crate::packet::MAX_PACKET_LEN;
@@ -28,7 +27,7 @@ pub async fn serve<A: Authenticator + 'static>(
     addr: &str,
     service: Service,
     handler: Arc<Handler<A>>,
-    clients: Arc<HashMap<IpAddr, ClientConfig>>,
+    clients: Arc<Clients>,
 ) -> anyhow::Result<()> {
     let socket = UdpSocket::bind(addr)
         .await
@@ -41,7 +40,7 @@ pub async fn serve_socket<A: Authenticator + 'static>(
     socket: Arc<UdpSocket>,
     service: Service,
     handler: Arc<Handler<A>>,
-    clients: Arc<HashMap<IpAddr, ClientConfig>>,
+    clients: Arc<Clients>,
 ) -> anyhow::Result<()> {
     tracing::info!(addr = %socket.local_addr()?, "lausche");
     let dedup = Arc::new(DedupCache::new(DEDUP_TTL, DEDUP_MAX_ENTRIES));
@@ -52,7 +51,7 @@ pub async fn serve_socket<A: Authenticator + 'static>(
         let data = buf[..n].to_vec();
 
         // Nur bekannte NAS-Clients bekommen eine Antwort.
-        let Some(client) = clients.get(&peer.ip()).cloned() else {
+        let Some(client) = clients.find(&peer.ip()).cloned() else {
             tracing::warn!(%peer, "Paket von unbekanntem Client verworfen");
             continue;
         };

@@ -1,6 +1,5 @@
 //! End-to-End-Tests: echter UDP-Server auf localhost (zufälliger Port), Client schickt Requests.
 
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -9,7 +8,7 @@ use std::time::Duration;
 use radius_rs::accounting::AccountingStore;
 use radius_rs::attributes::*;
 use radius_rs::auth::{AuthResult, Authenticator, StaticUsers, hash_password};
-use radius_rs::config::{ClientConfig, UserConfig};
+use radius_rs::config::{ClientConfig, Clients, UserConfig};
 use radius_rs::crypto;
 use radius_rs::handler::Handler;
 use radius_rs::packet::{Code, Packet};
@@ -39,16 +38,11 @@ struct TestServer {
 }
 
 async fn start_server() -> TestServer {
-    let mut clients = HashMap::new();
-    clients.insert(
-        "127.0.0.1".parse().unwrap(),
-        ClientConfig {
-            name: "test-nas".into(),
-            address: "127.0.0.1".parse().unwrap(),
-            secret: SECRET.into(),
-        },
-    );
-    let clients = Arc::new(clients);
+    let clients = Arc::new(Clients::new(vec![ClientConfig {
+        name: "test-nas".into(),
+        address: "127.0.0.0/8".parse().unwrap(),
+        secret: SECRET.into(),
+    }]));
     let calls = Arc::new(AtomicUsize::new(0));
     let handler = Arc::new(Handler {
         auth: Counting {
