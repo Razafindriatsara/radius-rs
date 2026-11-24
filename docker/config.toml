@@ -1,0 +1,33 @@
+# Demo-Konfiguration für das Docker-Image. NICHT für den echten Betrieb:
+# eigene config.toml mit eigenen Secrets und Passwörtern einbinden (siehe Dockerfile).
+
+[server]
+auth_listen = "0.0.0.0:1812"
+acct_listen = "0.0.0.0:1813"
+require_message_authenticator = true
+
+# Health Check im Container selbst
+[[clients]]
+name = "localhost"
+address = "127.0.0.1"
+secret = "testing123"
+
+# Docker-Netze (Bridge, Compose) und Zugriffe über veröffentlichte Ports
+[[clients]]
+name = "docker"
+address = "172.16.0.0/12"
+secret = "testing123"
+
+[[clients]]
+name = "docker-alt"
+address = "192.168.0.0/16"
+secret = "testing123"
+
+[[users]]
+name = "martin"
+password_hash = "$argon2id$v=19$m=19456,t=2,p=1$c89DK+SklS7D7QBRNCv+Qw$4NDMdW4fifyal6XFx8ooneujy0iQmVa5l7mEbrO2kv4" # geheim123
+session_timeout = 3600
+reply_message = "Willkommen bei radius-rs"
+
+[accounting]
+database = "/data/accounting.db"
