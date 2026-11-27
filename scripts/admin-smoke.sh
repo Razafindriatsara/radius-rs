@@ -10,10 +10,6 @@ trap 'rm -rf "$tmp"' EXIT
 
 for _ in $(seq 1 20); do curl -fsS -o /dev/null "$ADMIN/login" && break; sleep 1; done
 
-echo "== Gast anmelden am Portal"
-code=$(curl -s -o /dev/null -w '%{http_code}' -c "$tmp/guest" -d 'username=martin&password=geheim123' "$PORTAL/login")
-test "$code" = "303"
-
 echo "== Falsches Admin-Passwort"
 code=$(curl -s -o /dev/null -w '%{http_code}' -d 'password=falsch' "$ADMIN/login")
 test "$code" = "401"
@@ -21,9 +17,26 @@ test "$code" = "401"
 echo "== Admin anmelden"
 code=$(curl -s -o /dev/null -w '%{http_code}' -c "$tmp/admin" --data-urlencode "password=$PW" "$ADMIN/login")
 test "$code" = "303"
+csrf=$(curl -fsS -b "$tmp/admin" "$ADMIN/" | grep -o 'name="csrf" value="[0-9a-f]\{32\}"' | head -1 | grep -o '[0-9a-f]\{32\}')
+test -n "$csrf"
+
+echo "== Benutzer anlegen"
+user="smoke-$RANDOM"
+loc=$(curl -s -o /dev/null -w '%{redirect_url}' -b "$tmp/admin" \
+  --data-urlencode "csrf=$csrf" --data-urlencode "name=$user" --data-urlencode "password=smoke-geheim" \
+  "$ADMIN/users")
+case "$loc" in *m=created) ;; *) echo "Anlegen fehlgeschlagen: $loc"; exit 1 ;; esac
+
+echo "== $user meldet sich am Portal an"
+code=$(curl -s -o /dev/null -w '%{http_code}' -c "$tmp/guest" -d "username=$user&password=smoke-geheim" "$PORTAL/login")
+test "$code" = "303"
+code=$(curl -s -o /dev/null -w '%{http_code}' -b "$tmp/guest" "$PORTAL/status")
+test "$code" = "200"
+
+# Zeile dieses Benutzers in der Übersicht suchen
 curl -fsS -b "$tmp/admin" "$ADMIN/" > "$tmp/dash.html"
-csrf=$(grep -o 'name="csrf" value="[0-9a-f]\{32\}"' "$tmp/dash.html" | head -1 | grep -o '[0-9a-f]\{32\}')
-form=$(grep -o 'action="/sessions/disconnect">[^/]*session_id" value="[^"]*"><input type="hidden" name="nas" value="[^"]*"' "$tmp/dash.html" | head -1)
+row=$(tr -d "\n" < "$tmp/dash.html" | grep -o "<tr><td><strong>$user</strong>.*")
+form=${row#*action=\"/sessions/disconnect\"}
 sid=${form#*session_id\" value=\"}; sid=${sid%%\"*}
 nas=${form#*name=\"nas\" value=\"}; nas=${nas%%\"*}
 test -n "$sid" && test -n "$nas"
