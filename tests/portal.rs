@@ -32,6 +32,7 @@ async fn start_radius() -> Env {
         name: "portal".into(),
         address: "127.0.0.0/8".parse().unwrap(),
         secret: SECRET.into(),
+        coa_port: 3799,
     }]));
     let handler = Arc::new(Handler {
         auth: StaticUsers::new(vec![
@@ -49,7 +50,7 @@ async fn start_radius() -> Env {
             },
         ]),
         require_message_authenticator: true,
-        accounting: Some(AccountingStore::in_memory().unwrap()),
+        accounting: Some(Arc::new(AccountingStore::in_memory().unwrap())),
     });
     let a = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
     let b = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
@@ -74,6 +75,7 @@ fn portal(auth: SocketAddr, acct: SocketAddr) -> (Arc<AppState>, PortalConfig) {
         secure_cookie: false,
         max_failures: 5,
         failure_window: Duration::from_secs(300),
+        coa_listen: None,
     };
     (AppState::new(cfg.clone()), cfg)
 }

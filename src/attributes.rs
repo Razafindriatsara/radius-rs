@@ -30,6 +30,8 @@ pub const LOGIN_SERVICE: u8 = 15;
 pub const EAP_MESSAGE: u8 = 79;
 /// RFC 3579: HMAC-MD5 über das gesamte Paket. Pflicht seit BlastRADIUS (CVE-2024-3596).
 pub const MESSAGE_AUTHENTICATOR: u8 = 80;
+/// RFC 5176: Grund für ein Disconnect-NAK
+pub const ERROR_CAUSE: u8 = 101;
 
 /// Menschlich lesbarer Name für Logs.
 pub fn name(t: u8) -> &'static str {
@@ -63,6 +65,7 @@ pub fn name(t: u8) -> &'static str {
         ACCT_OUTPUT_GIGAWORDS => "Acct-Output-Gigawords",
         EAP_MESSAGE => "EAP-Message",
         MESSAGE_AUTHENTICATOR => "Message-Authenticator",
+        ERROR_CAUSE => "Error-Cause",
         _ => "Unknown",
     }
 }

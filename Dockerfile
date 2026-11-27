@@ -28,6 +28,6 @@ COPY docker/config.toml /etc/radius-rs/config.toml
 USER radius
 WORKDIR /data
 VOLUME /data
-EXPOSE 1812/udp 1813/udp 8080/tcp
+EXPOSE 1812/udp 1813/udp 3799/udp 8080/tcp 8090/tcp
 ENTRYPOINT ["radius-rs"]
 CMD ["/etc/radius-rs/config.toml"]

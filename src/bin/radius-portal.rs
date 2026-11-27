@@ -9,6 +9,7 @@
 //!   NAS_IDENTIFIER       Name gegenüber dem Server   (Standard radius-portal)
 //!   PORTAL_SECURE_COOKIE 1 = Cookie nur über HTTPS
 //!   PORTAL_MAX_FAILURES  Fehlversuche pro IP in 5 Minuten (Standard 5)
+//!   PORTAL_COA_LISTEN    UDP-Adresse für Disconnect-Requests (Standard 0.0.0.0:3799, leer = aus)
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

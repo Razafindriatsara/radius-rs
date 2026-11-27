@@ -27,8 +27,9 @@ RADIUS ist das Protokoll, mit dem Access Points, Switches und VPN-Gateways (der 
 - [x] Pro-Client Shared Secrets, Clients als einzelne IP oder Netz (CIDR, IPv4/IPv6), unbekannte Clients werden verworfen
 - [x] Argon2 und SQLite laufen im Blocking-Threadpool und bremsen den Async-Server nicht aus
 - [x] **Eingangsportal `radius-portal`** (Captive Portal) mit App-Oberfläche: Anmeldung per RADIUS, Accounting Start/Stop, Countdown bis zum Session-Timeout, Schutz vor Brute Force, installierbar als Web-App
+- [x] **Admin-Oberfläche** im Browser: aktive Sitzungen trennen (Disconnect nach RFC 5176), Benutzer anlegen, sperren und löschen ohne Neustart, Gast-Zugänge mit Ablaufzeit zum Ausdrucken, Verlauf mit CSV-Export
 - [x] Eigener Testclient `radius-client`, der Antworten kryptografisch prüft
-- [x] 37 automatische Tests, darunter Testvektoren aus RFC 2865 und Property-Tests
+- [x] 52 automatische Tests, darunter Testvektoren aus RFC 2865 und Property-Tests
 - [x] **Interoperabilität mit FreeRADIUS**: 15 Tests mit `radclient` laufen bei jedem Push
 - [x] **Docker-Image** (121 MB, läuft ohne Root) und Compose-Demo mit Health Check
 - [x] **Automatische Releases**: Programme für Linux (x86_64, ARM64), Windows und macOS sowie Multi-Arch-Docker-Image auf ghcr.io
@@ -38,7 +39,7 @@ RADIUS ist das Protokoll, mit dem Access Points, Switches und VPN-Gateways (der 
 
 - [ ] RadSec (RADIUS über TLS, RFC 6614) mit `rustls`
 - [ ] EAP (PEAP/EAP-TLS) für WPA2-Enterprise
-- [ ] CoA/Disconnect (RFC 5176), um aktive Sessions zu trennen
+- [ ] CoA-Request (RFC 5176), um laufende Sitzungen zu ändern (zum Beispiel Bandbreite)
 - [ ] Prometheus-Metriken
 - [ ] Demo mit echter Hardware (OpenWrt-Hotspot), Freigabe im Gateway durch das Portal
 - [ ] Fuzzing mit `cargo-fuzz`
@@ -53,8 +54,13 @@ NAS ─────────────────────────�
                                                    ▼
                                              handler.rs   (Protokoll-Logik, ohne Netzwerk testbar)
                               ┌──────────────┬────┴─────────┬──────────────┐
-                          packet.rs      crypto.rs        auth.rs      accounting.rs
-                          (Codec)        (MD5/HMAC)       (Argon2)     (SQLite)
+                          packet.rs      crypto.rs     users.rs/auth.rs   accounting.rs
+                          (Codec)        (MD5/HMAC)    (SQLite, Argon2)    (SQLite)
+                                                            ▲                 ▲
+                         admin.rs (HTTP 8090) ──────────────┴─────────────────┘
+                              │ Disconnect-Request (UDP 3799, RFC 5176)
+                              ▼
+                         NAS / radius-portal
 ```
 
 `handler.rs` arbeitet nur mit Bytes rein und Bytes raus. Dadurch lässt sich die gesamte Protokoll-Logik ohne Sockets testen. Das Benutzer-Backend steckt hinter dem Trait `Authenticator` und lässt sich gegen SQL oder LDAP austauschen.
@@ -84,10 +90,35 @@ PORTAL_TITLE="Gäste-WLAN" RADIUS_SECRET=testing123 cargo run --bin radius-porta
 | `NAS_IDENTIFIER` | `radius-portal` | Name des Portals in den Accounting-Daten |
 | `PORTAL_SECURE_COOKIE` | `0` | `1` = Cookie nur über HTTPS (hinter einem TLS-Proxy) |
 | `PORTAL_MAX_FAILURES` | `5` | Fehlversuche pro IP in 5 Minuten, danach Sperre |
+| `PORTAL_COA_LISTEN` | `0.0.0.0:3799` | Empfang von Disconnect-Requests (RFC 5176), leer = aus |
 
 **Sicherheit:** Sitzungs-Cookie mit 128 Bit aus dem Zufallsgenerator des Betriebssystems, `HttpOnly` und `SameSite=Strict`; Content-Security-Policy ohne Inline-Skripte; alle Ausgaben HTML-maskiert, auch die Reply-Message des Servers; Sperre nach wiederholten Fehlversuchen; jede RADIUS-Antwort wird über Response Authenticator und Message-Authenticator geprüft.
 
 **Grenze:** Das Portal gibt keinen Internetzugang in der Firewall frei. In einem echten Hotspot übernimmt das ein Gateway (zum Beispiel OpenWrt mit nftables), das Portal liefert Anmeldung, Sitzungsverwaltung und RADIUS-Anbindung.
+
+## Admin-Oberfläche
+
+![Admin-Oberfläche: Übersicht mit aktiven Sitzungen, Benutzerverwaltung, Gast-Zugang](docs/admin.png)
+
+Die Admin-Oberfläche läuft im Server-Prozess und nutzt dieselbe Datenbank. Sie wird mit einem `[admin]`-Abschnitt in `config.toml` eingeschaltet:
+
+```toml
+[admin]
+listen = "127.0.0.1:8090"          # Standard: nur auf diesem Rechner erreichbar
+password_hash = "$argon2id$..."    # cargo run -- hash-password <admin-passwort>
+```
+
+Im Docker-Demo ist sie unter http://localhost:8090 erreichbar (Passwort `admin-demo`).
+
+| Bereich | Funktion |
+|---|---|
+| Übersicht | Kacheln (aktive Sitzungen, Sitzungen und Download der letzten 24 h, Benutzer), Tabelle der aktiven Sitzungen |
+| Trennen | Disconnect-Request nach RFC 5176 an den NAS (Port `coa_port`, Standard 3799). Antwortet der NAS nicht, lässt sich die Sitzung als beendet markieren |
+| Verlauf | Filter nach Benutzer und aktiven Sitzungen, Export als CSV für Excel |
+| Benutzer | Anlegen, Passwort ändern, sperren, entsperren, löschen, wirkt sofort ohne Neustart. Benutzer aus `config.toml` werden angezeigt, sind dort aber nur lesbar |
+| Gast-Zugang | Ein Klick erzeugt Benutzername und Passwort mit Ablaufzeit (1 Stunde bis 7 Tage) als druckbaren Beleg. Abgelaufene Zugänge werden nach 7 Tagen automatisch gelöscht |
+
+**Sicherheit:** eigenes Admin-Passwort als Argon2-Hash, Sitzungs-Cookie mit 128 Bit (`HttpOnly`, `SameSite=Strict`, 8 Stunden), CSRF-Token in jedem Formular, Sperre nach 5 Fehlversuchen pro IP, Content-Security-Policy ohne Inline-Skripte, CSV-Export gegen Formel-Injection geschützt. Das Portal nimmt Disconnect-Requests nur mit gültiger Signatur des Shared Secrets an.
 
 ## Installation
 
@@ -133,6 +164,7 @@ Der Workflow `release.yml` baut die Programme für alle vier Plattformen, legt d
 docker compose up -d radius        # Server bauen und starten (Ports 1812/1813 UDP)
 docker compose run --rm demo       # Demo: Anmeldung, Ablehnung, Accounting
 docker compose exec radius radius-rs sessions /etc/radius-rs/config.toml
+# Admin-Oberfläche: http://localhost:8090 (Passwort admin-demo)
 docker compose down                # stoppen
 ```
 
@@ -223,6 +255,7 @@ cargo test
 | `net`, `config` | CIDR für IPv4/IPv6, IPv4-mapped IPv6, spezifischster Client gewinnt, ungültige Adressen |
 | End-to-End | Echtes UDP: Accept, Reject, Verwerfen ohne Message-Authenticator, Duplikat (Passwort wird nur einmal geprüft), Accounting landet in der DB |
 | Interop | 15 Tests mit `radclient` (FreeRADIUS 3.2), gegen Binary und Docker-Container |
+| Admin | Anmeldung und CSRF-Schutz, Benutzer anlegen, sperren, Passwort ändern, löschen, Trennen per Disconnect-Request bis zum Accounting-Stop im Portal, Gast-Beleg funktioniert am Portal, Verlauf und CSV |
 | Portal | Anmeldung, Fehlversuch, Status, Abmeldung mit Accounting-Stop, Session-Timeout, Sperre nach 5 Fehlversuchen, Server nicht erreichbar, Sicherheits-Header |
 
 ## Design-Entscheidungen
@@ -243,6 +276,7 @@ cargo test
 - RFC 2866: RADIUS Accounting
 - RFC 3579: RADIUS Support for EAP (Message-Authenticator)
 - RFC 5080: Common RADIUS Implementation Issues (Duplikaterkennung)
+- RFC 5176: Dynamic Authorization Extensions (Disconnect)
 - RFC 5997: Status-Server
 - RFC 6614: RADIUS over TLS (RadSec)
 - CVE-2024-3596: BlastRADIUS

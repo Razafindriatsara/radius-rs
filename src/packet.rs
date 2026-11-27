@@ -28,6 +28,10 @@ pub enum Code {
     AccessChallenge,
     StatusServer,
     StatusClient,
+    /// RFC 5176: Server bittet den NAS, eine Sitzung zu beenden
+    DisconnectRequest,
+    DisconnectAck,
+    DisconnectNak,
     Other(u8),
 }
 
@@ -42,6 +46,9 @@ impl From<u8> for Code {
             11 => Code::AccessChallenge,
             12 => Code::StatusServer,
             13 => Code::StatusClient,
+            40 => Code::DisconnectRequest,
+            41 => Code::DisconnectAck,
+            42 => Code::DisconnectNak,
             x => Code::Other(x),
         }
     }
@@ -58,6 +65,9 @@ impl From<Code> for u8 {
             Code::AccessChallenge => 11,
             Code::StatusServer => 12,
             Code::StatusClient => 13,
+            Code::DisconnectRequest => 40,
+            Code::DisconnectAck => 41,
+            Code::DisconnectNak => 42,
             Code::Other(x) => x,
         }
     }

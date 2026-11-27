@@ -42,6 +42,7 @@ async fn start_server() -> TestServer {
         name: "test-nas".into(),
         address: "127.0.0.0/8".parse().unwrap(),
         secret: SECRET.into(),
+        coa_port: 3799,
     }]));
     let calls = Arc::new(AtomicUsize::new(0));
     let handler = Arc::new(Handler {
@@ -55,7 +56,7 @@ async fn start_server() -> TestServer {
             calls: calls.clone(),
         },
         require_message_authenticator: true,
-        accounting: Some(AccountingStore::in_memory().unwrap()),
+        accounting: Some(Arc::new(AccountingStore::in_memory().unwrap())),
     });
 
     let auth_sock = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());

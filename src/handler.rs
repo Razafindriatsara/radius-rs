@@ -11,7 +11,7 @@ pub struct Handler<A: Authenticator> {
     pub auth: A,
     pub require_message_authenticator: bool,
     /// Optional: ohne Datenbank werden Accounting-Requests nur geloggt und bestätigt.
-    pub accounting: Option<AccountingStore>,
+    pub accounting: Option<std::sync::Arc<AccountingStore>>,
 }
 
 /// Warum ein Paket stillschweigend verworfen wurde. RFC 2865 verlangt,

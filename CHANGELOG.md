@@ -2,6 +2,19 @@
 
 Alle nennenswerten Änderungen an diesem Projekt. Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionierung nach [Semantic Versioning](https://semver.org/lang/de/).
 
+## [Unreleased]
+
+Admin-Oberfläche.
+
+### Neu
+- Admin-Oberfläche im Browser (`[admin]` in `config.toml`, Standard `127.0.0.1:8090`) mit eigenem Admin-Passwort, CSRF-Schutz und Sperre nach Fehlversuchen
+- Aktive Sitzungen trennen per Disconnect-Request nach RFC 5176, alternativ als beendet markieren
+- Benutzerverwaltung in SQLite: anlegen, Passwort ändern, sperren, löschen, ohne Neustart. Benutzer aus `config.toml` bleiben gültig
+- Gast-Zugänge mit Ablaufzeit und druckbarem Beleg, automatisches Aufräumen
+- Verlauf mit Filter und CSV-Export
+- Portal empfängt Disconnect-Requests (`PORTAL_COA_LISTEN`, Standard Port 3799)
+- Accounting speichert die IP-Adresse des NAS, Client-Option `coa_port`
+
 ## [0.2.0] – 2026-11-27
 
 Eingangsportal für Gäste-WLAN und Hotspots.
@@ -37,5 +50,6 @@ Erste veröffentlichte Version.
 - 15 Interoperabilitätstests gegen `radclient` von FreeRADIUS
 - CI auf Linux, Windows und macOS
 
+[Unreleased]: https://github.com/Razafindriatsara/radius-rs/compare/v0.2.0...HEAD
 [0.2.0]: https://github.com/Razafindriatsara/radius-rs/releases/tag/v0.2.0
 [0.1.0]: https://github.com/Razafindriatsara/radius-rs/releases/tag/v0.1.0

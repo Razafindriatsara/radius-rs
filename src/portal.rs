@@ -15,15 +15,22 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use axum::Router;
 use axum::extract::{ConnectInfo, Form, State};
-use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE, COOKIE, SET_COOKIE};
-use axum::http::{HeaderMap, HeaderValue, StatusCode};
-use axum::response::{AppendHeaders, Html, IntoResponse, Redirect, Response};
+#[cfg(test)]
+use axum::http::HeaderValue;
+#[cfg(test)]
+use axum::http::header::COOKIE;
+use axum::http::header::SET_COOKIE;
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::{AppendHeaders, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use serde::Deserialize;
 
+use crate::web::{asset, hex, hex_cookie, page, security_headers};
+pub use crate::web::{fmt_duration, html_escape};
+
 use crate::client::{
-    ACCT_START, ACCT_STOP, AcctRequest, AuthOutcome, CAUSE_SESSION_TIMEOUT, CAUSE_USER_REQUEST, ClientConfig,
-    ClientError, RadiusClient, random_bytes,
+    ACCT_START, ACCT_STOP, AcctRequest, AuthOutcome, CAUSE_ADMIN_RESET, CAUSE_SESSION_TIMEOUT, CAUSE_USER_REQUEST,
+    ClientConfig, ClientError, RadiusClient, random_bytes,
 };
 
 const COOKIE_NAME: &str = "portal_session";
@@ -39,6 +46,8 @@ pub struct PortalConfig {
     /// Fehlversuche pro IP, bevor weitere Versuche gesperrt werden
     pub max_failures: u32,
     pub failure_window: Duration,
+    /// UDP-Adresse für Disconnect-Requests vom RADIUS-Server (RFC 5176), `None` = aus
+    pub coa_listen: Option<String>,
 }
 
 impl PortalConfig {
@@ -59,6 +68,7 @@ impl PortalConfig {
             secure_cookie: var("PORTAL_SECURE_COOKIE", "0") == "1",
             max_failures: var("PORTAL_MAX_FAILURES", "5").parse().unwrap_or(5),
             failure_window: Duration::from_secs(300),
+            coa_listen: Some(var("PORTAL_COA_LISTEN", "0.0.0.0:3799")).filter(|v| !v.is_empty()),
         }
     }
 }
@@ -160,6 +170,37 @@ impl AppState {
     }
 }
 
+/// Nimmt Disconnect-Requests (RFC 5176) vom RADIUS-Server an und beendet die Sitzung.
+pub async fn serve_coa(state: Arc<AppState>, socket: tokio::net::UdpSocket) -> anyhow::Result<()> {
+    tracing::info!(addr = %socket.local_addr()?, "Disconnect-Empfänger (RFC 5176) läuft");
+    let mut buf = vec![0u8; 4096];
+    loop {
+        let (n, peer) = socket.recv_from(&mut buf).await?;
+        let mut ended = None;
+        let reply = crate::coa::handle_disconnect(&buf[..n], &state.cfg.client.secret, |user, sid| {
+            let mut map = state.sessions.lock().unwrap();
+            let key = map
+                .iter()
+                .find(|(_, s)| {
+                    sid.as_deref().is_none_or(|x| x == s.acct_id) && user.as_deref().is_none_or(|u| u == s.user)
+                })
+                .map(|(k, _)| k.clone());
+            ended = key.and_then(|k| map.remove(&k));
+            ended.is_some()
+        });
+        match reply {
+            Some(r) => {
+                let _ = socket.send_to(&r, peer).await;
+                if let Some(s) = ended {
+                    tracing::info!(user = s.user, %peer, "Sitzung vom Administrator getrennt");
+                    state.end_session(s, CAUSE_ADMIN_RESET).await;
+                }
+            }
+            None => tracing::warn!(%peer, "ungültiger Disconnect-Request verworfen"),
+        }
+    }
+}
+
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/", get(index))
@@ -190,6 +231,17 @@ pub async fn run(cfg: PortalConfig) -> anyhow::Result<()> {
             bg.expire_sessions().await;
         }
     });
+    if let Some(addr) = state.cfg.coa_listen.clone() {
+        let sock = tokio::net::UdpSocket::bind(&addr)
+            .await
+            .map_err(|e| anyhow::anyhow!("Kann {addr} für Disconnect-Requests nicht öffnen ({e})"))?;
+        let st = state.clone();
+        tokio::spawn(async move {
+            if let Err(e) = serve_coa(st, sock).await {
+                tracing::error!(error = %e, "Disconnect-Empfänger beendet");
+            }
+        });
+    }
     let listener = tokio::net::TcpListener::bind(&listen)
         .await
         .map_err(|e| anyhow::anyhow!("Kann {listen} nicht öffnen ({e})"))?;
@@ -336,15 +388,7 @@ async fn manifest(State(st): State<Arc<AppState>>) -> Response {
 // ---------------------------------------------------------------- Hilfsfunktionen
 
 fn session_id(headers: &HeaderMap) -> Option<String> {
-    headers
-        .get_all(COOKIE)
-        .iter()
-        .filter_map(|v| v.to_str().ok())
-        .flat_map(|v| v.split(';'))
-        .find_map(|c| {
-            let (k, v) = c.trim().split_once('=')?;
-            (k == COOKIE_NAME && v.len() == 32 && v.bytes().all(|b| b.is_ascii_hexdigit())).then(|| v.to_string())
-        })
+    hex_cookie(headers, COOKIE_NAME, 32)
 }
 
 fn ipv4(ip: IpAddr) -> Option<[u8; 4]> {
@@ -354,31 +398,11 @@ fn ipv4(ip: IpAddr) -> Option<[u8; 4]> {
     }
 }
 
-fn hex(b: &[u8]) -> String {
-    b.iter().map(|x| format!("{x:02x}")).collect()
-}
-
 fn now_unix() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
-}
-
-/// Schützt vor HTML-Injection: alle Werte (auch die Reply-Message vom Server) werden maskiert.
-pub fn html_escape(s: &str) -> String {
-    let mut o = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            '&' => o.push_str("&amp;"),
-            '<' => o.push_str("&lt;"),
-            '>' => o.push_str("&gt;"),
-            '"' => o.push_str("&quot;"),
-            '\'' => o.push_str("&#39;"),
-            c => o.push(c),
-        }
-    }
-    o
 }
 
 fn json_escape(s: &str) -> String {
@@ -390,34 +414,6 @@ fn json_escape(s: &str) -> String {
             c => vec![c],
         })
         .collect()
-}
-
-fn asset(ct: &'static str, body: impl Into<String>) -> Response {
-    let mut r = body.into().into_response();
-    r.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static(ct));
-    r.headers_mut()
-        .insert(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600"));
-    r
-}
-
-fn page(code: StatusCode, html: String) -> Response {
-    let mut r = (code, Html(html)).into_response();
-    r.headers_mut()
-        .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
-    r
-}
-
-async fn security_headers(mut r: Response) -> Response {
-    let h = r.headers_mut();
-    h.insert(
-        "content-security-policy",
-        HeaderValue::from_static(
-            "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
-        ),
-    );
-    h.insert("x-content-type-options", HeaderValue::from_static("nosniff"));
-    h.insert("referrer-policy", HeaderValue::from_static("no-referrer"));
-    r
 }
 
 // ---------------------------------------------------------------- Seiten
@@ -550,20 +546,11 @@ fn message_page(title: &str, heading: &str, text: &str) -> String {
     )
 }
 
-pub fn fmt_duration(secs: u32) -> String {
-    let (h, m, s) = (secs / 3600, (secs % 3600) / 60, secs % 60);
-    if h > 0 {
-        format!("{h}:{m:02}:{s:02}")
-    } else {
-        format!("{m}:{s:02}")
-    }
-}
-
 // ---------------------------------------------------------------- Assets
 
 const WIFI_SVG: &str = r#"<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 8.5a15 15 0 0 1 20 0"/><path d="M5 12a10 10 0 0 1 14 0"/><path d="M8.5 15.5a5 5 0 0 1 7 0"/><circle cx="12" cy="19" r="1.2" fill="currentColor"/></svg>"#;
 
-const ICON_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#2563eb"/><g fill="none" stroke="#fff" stroke-width="36" stroke-linecap="round"><path d="M96 212a228 228 0 0 1 320 0"/><path d="M150 268a152 152 0 0 1 212 0"/><path d="M204 322a76 76 0 0 1 104 0"/></g><circle cx="256" cy="380" r="26" fill="#fff"/></svg>"##;
+pub(crate) const ICON_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#2563eb"/><g fill="none" stroke="#fff" stroke-width="36" stroke-linecap="round"><path d="M96 212a228 228 0 0 1 320 0"/><path d="M150 268a152 152 0 0 1 212 0"/><path d="M204 322a76 76 0 0 1 104 0"/></g><circle cx="256" cy="380" r="26" fill="#fff"/></svg>"##;
 
 const APP_JS: &str = r#"// Passwort anzeigen, Ladezustand, Countdown-Ring
 document.querySelectorAll('.toggle').forEach(b => b.addEventListener('click', () => {

@@ -2,10 +2,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use radius_rs::accounting::{AccountingStore, terminate_cause_name};
+use radius_rs::admin::AdminState;
 use radius_rs::auth::{StaticUsers, hash_password};
 use radius_rs::config::Config;
 use radius_rs::handler::Handler;
 use radius_rs::server::{Service, serve};
+use radius_rs::users::{Directory, UserStore};
 
 const USAGE: &str = "\
 radius-rs: RADIUS-Server
@@ -56,20 +58,57 @@ async fn run_server(path: PathBuf) -> anyhow::Result<()> {
         "Konfiguration geladen"
     );
 
-    let accounting = if config.accounting.database.is_empty() {
-        tracing::info!("Accounting ohne Datenbank (nur Log)");
-        None
+    let db_path = config.accounting.database.clone();
+    let (accounting, user_db) = if db_path.is_empty() {
+        tracing::info!("ohne Datenbank: Accounting nur im Log, Benutzer nur aus der Konfiguration");
+        (None, None)
     } else {
-        tracing::info!(database = config.accounting.database, "Accounting-Datenbank geöffnet");
-        Some(AccountingStore::open(Path::new(&config.accounting.database))?)
+        tracing::info!(database = db_path, "Datenbank geöffnet");
+        (
+            Some(Arc::new(AccountingStore::open(Path::new(&db_path))?)),
+            Some(Arc::new(UserStore::open(Path::new(&db_path))?)),
+        )
     };
 
     let clients = Arc::new(config.client_list());
     let handler = Arc::new(Handler {
-        auth: StaticUsers::new(config.users.clone()),
+        auth: Directory {
+            db: user_db.clone(),
+            config: StaticUsers::new(config.users.clone()),
+        },
         require_message_authenticator: config.server.require_message_authenticator,
-        accounting,
+        accounting: accounting.clone(),
     });
+
+    // Abgelaufene Gast-Zugänge nach 7 Tagen automatisch entfernen
+    if let Some(db) = user_db.clone() {
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(std::time::Duration::from_secs(3600));
+            loop {
+                tick.tick().await;
+                if let Ok(n) = db.purge_expired_guests(7 * 86_400)
+                    && n > 0
+                {
+                    tracing::info!(entfernt = n, "abgelaufene Gast-Zugänge aufgeräumt");
+                }
+            }
+        });
+    }
+
+    if let Some(admin_cfg) = config.admin.clone() {
+        let (Some(sessions), Some(users)) = (accounting.clone(), user_db.clone()) else {
+            anyhow::bail!(
+                "Die Admin-Oberfläche braucht eine Datenbank: [accounting] database in der Konfiguration setzen."
+            );
+        };
+        let names = config.users.iter().map(|u| u.name.clone()).collect();
+        let state = AdminState::new(admin_cfg, users, sessions, clients.clone(), names);
+        tokio::spawn(async move {
+            if let Err(e) = radius_rs::admin::run(state).await {
+                tracing::error!(error = %e, "Admin-Oberfläche beendet");
+            }
+        });
+    }
 
     tokio::select! {
         r = serve(&config.server.auth_listen, Service::Auth, handler.clone(), clients.clone()) => r?,

@@ -67,6 +67,7 @@ pub const ACCT_START: u32 = 1;
 pub const ACCT_STOP: u32 = 2;
 pub const CAUSE_USER_REQUEST: u32 = 1;
 pub const CAUSE_SESSION_TIMEOUT: u32 = 5;
+pub const CAUSE_ADMIN_RESET: u32 = 6;
 
 #[derive(Debug, Clone)]
 pub struct RadiusClient {

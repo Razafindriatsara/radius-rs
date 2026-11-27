@@ -15,6 +15,7 @@ require_message_authenticator = true
 name = "localhost"
 address = "127.0.0.1"
 secret = "testing123"
+# coa_port = 3799   # Port für Disconnect-Requests (RFC 5176) aus der Admin-Oberfläche
 
 # Benutzer. Hash erzeugen mit:  cargo run -- hash-password <passwort>
 [[users]]
@@ -27,3 +28,10 @@ reply_message = "Willkommen bei radius-rs"
 # SQLite-Datenbank für Accounting-Sessions. Leer lassen ("") = nur ins Log schreiben.
 # Anzeigen mit:  cargo run -- sessions
 database = "accounting.db"
+
+# Admin-Oberfläche im Browser (braucht die Datenbank oben).
+# Passwort-Hash erzeugen mit:  cargo run -- hash-password <admin-passwort>
+# [admin]
+# listen = "127.0.0.1:8090"      # nur lokal erreichbar; für Zugriff im Netz bewusst ändern
+# password_hash = "$argon2id$..."
+# title = "radius-rs Admin"

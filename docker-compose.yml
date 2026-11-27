@@ -1,5 +1,6 @@
 # Server starten:            docker compose up -d radius
 # Eingangsportal starten:    docker compose up -d portal   → http://localhost:8080
+# Admin-Oberfläche:          http://localhost:8090 (Demo-Passwort: admin-demo)
 # Demo-Client ausführen:     docker compose run --rm demo
 # Sessions anzeigen:         docker compose exec radius radius-rs sessions /etc/radius-rs/config.toml
 # Logs:                      docker compose logs -f radius
@@ -10,6 +11,8 @@ services:
     ports:
       - "1812:1812/udp"
       - "1813:1813/udp"
+      # Admin-Oberfläche nur auf diesem Rechner erreichbar
+      - "127.0.0.1:8090:8090"
     volumes:
       - radius-data:/data
       # Eigene Konfiguration statt der Demo-Konfiguration:
@@ -32,6 +35,8 @@ services:
       RADIUS_ACCT_SERVER: "radius:1813"
       RADIUS_SECRET: "testing123"
       NAS_IDENTIFIER: "radius-portal"
+      # Empfängt Disconnect-Requests (RFC 5176) der Admin-Oberfläche im Compose-Netz
+      PORTAL_COA_LISTEN: "0.0.0.0:3799"
     ports:
       - "8080:8080"
     depends_on:

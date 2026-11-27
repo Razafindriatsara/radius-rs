@@ -16,6 +16,28 @@ pub struct Config {
     pub users: Vec<UserConfig>,
     #[serde(default)]
     pub accounting: AccountingConfig,
+    /// Admin-Oberfläche; fehlt der Abschnitt, ist sie aus.
+    #[serde(default)]
+    pub admin: Option<AdminConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AdminConfig {
+    /// Adresse der Admin-Oberfläche. Standard nur lokal erreichbar.
+    #[serde(default = "default_admin_listen")]
+    pub listen: String,
+    /// Argon2-Hash des Admin-Passworts (`radius-rs hash-password …`)
+    pub password_hash: String,
+    #[serde(default = "default_admin_title")]
+    pub title: String,
+}
+
+fn default_admin_listen() -> String {
+    "127.0.0.1:8090".into()
+}
+
+fn default_admin_title() -> String {
+    "radius-rs Admin".into()
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -54,6 +76,13 @@ pub struct ClientConfig {
     #[serde(deserialize_with = "deserialize_net")]
     pub address: IpNet,
     pub secret: String,
+    /// Port, auf dem der NAS Disconnect-Requests annimmt (RFC 5176, Standard 3799)
+    #[serde(default = "default_coa_port")]
+    pub coa_port: u16,
+}
+
+pub fn default_coa_port() -> u16 {
+    3799
 }
 
 fn deserialize_net<'de, D: Deserializer<'de>>(d: D) -> Result<IpNet, D::Error> {
@@ -132,6 +161,7 @@ mod tests {
             name: name.into(),
             address: addr.parse().unwrap(),
             secret: "s".into(),
+            coa_port: 3799,
         }
     }
 

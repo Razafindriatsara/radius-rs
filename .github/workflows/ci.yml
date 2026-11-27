@@ -75,6 +75,8 @@ jobs:
           test "$code" = "303"
           code=$(curl -s -o /dev/null -w '%{http_code}' -d 'username=martin&password=falsch' http://127.0.0.1:8080/login)
           test "$code" = "401"
+      - name: Admin-Oberfläche (Trennen per RFC 5176)
+        run: ./scripts/admin-smoke.sh
       - name: radclient gegen den Container
         run: SERVER=127.0.0.1 AUTH_PORT=1812 ACCT_PORT=1813 SKIP_START=1 ./scripts/interop-freeradius.sh
       - name: Logs und Aufräumen

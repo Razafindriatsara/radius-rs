@@ -31,3 +31,9 @@ reply_message = "Willkommen bei radius-rs"
 
 [accounting]
 database = "/data/accounting.db"
+
+# Admin-Oberfläche (im Container auf allen Schnittstellen; compose veröffentlicht sie nur auf 127.0.0.1)
+[admin]
+listen = "0.0.0.0:8090"
+password_hash = "$argon2id$v=19$m=19456,t=2,p=1$vFhtdJejUsbwTKe34POASQ$O1G/LmDbkjnvhE35i+y4cEEtrtWxG3fR4Kde1XHN9LM" # admin-demo
+title = "Gäste-WLAN Admin"
