@@ -2,7 +2,9 @@
 
 Alle nennenswerten Änderungen an diesem Projekt. Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionierung nach [Semantic Versioning](https://semver.org/lang/de/).
 
-## [Unreleased]
+## [0.2.0] – 2026-11-27
+
+Eingangsportal für Gäste-WLAN und Hotspots.
 
 ### Neu
 - Eingangsportal `radius-portal` (Captive Portal) mit App-Oberfläche für Smartphones: Anmeldung, Statusseite mit Countdown bis zum Session-Timeout, Abmeldung, Dunkelmodus, installierbar als Web-App
@@ -35,4 +37,5 @@ Erste veröffentlichte Version.
 - 15 Interoperabilitätstests gegen `radclient` von FreeRADIUS
 - CI auf Linux, Windows und macOS
 
+[0.2.0]: https://github.com/Razafindriatsara/radius-rs/releases/tag/v0.2.0
 [0.1.0]: https://github.com/Razafindriatsara/radius-rs/releases/tag/v0.1.0

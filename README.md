@@ -101,9 +101,9 @@ PORTAL_TITLE="Gäste-WLAN" RADIUS_SECRET=testing123 cargo run --bin radius-porta
 | macOS (Apple Silicon) | `radius-rs-vX.Y.Z-aarch64-apple-darwin.tar.gz` |
 
 ```bash
-sha256sum -c radius-rs-v0.1.0-x86_64-unknown-linux-gnu.tar.gz.sha256   # Prüfsumme kontrollieren
-tar xzf radius-rs-v0.1.0-x86_64-unknown-linux-gnu.tar.gz
-cd radius-rs-v0.1.0-x86_64-unknown-linux-gnu
+sha256sum -c radius-rs-v0.2.0-x86_64-unknown-linux-gnu.tar.gz.sha256   # Prüfsumme kontrollieren
+tar xzf radius-rs-v0.2.0-x86_64-unknown-linux-gnu.tar.gz
+cd radius-rs-v0.2.0-x86_64-unknown-linux-gnu
 cp config.example.toml config.toml
 ./radius-rs config.toml
 ```

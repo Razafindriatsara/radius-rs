@@ -1,6 +1,6 @@
 [package]
 name = "radius-rs"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "Schlanker, sicherheitsorientierter RADIUS-Server (RFC 2865/2866) in Rust"
 license = "MIT"
