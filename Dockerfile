@@ -13,20 +13,21 @@ WORKDIR /src
 # Abhängigkeiten zuerst bauen, damit Docker sie bei Codeänderungen aus dem Cache nimmt
 COPY Cargo.toml Cargo.lock ./
 RUN mkdir -p src/bin && echo 'fn main() {}' > src/main.rs && echo 'fn main() {}' > src/bin/radius-client.rs \
+    && echo 'fn main() {}' > src/bin/radius-portal.rs \
     && touch src/lib.rs && cargo build --release --locked && rm -rf src
 COPY src ./src
-RUN touch src/lib.rs src/main.rs src/bin/radius-client.rs && cargo build --release --locked --bins
+RUN touch src/lib.rs src/main.rs src/bin/radius-client.rs src/bin/radius-portal.rs && cargo build --release --locked --bins
 
 # ---- Laufzeit ---------------------------------------------------------------
 FROM debian:bookworm-slim
 RUN useradd --system --uid 10001 --home-dir /data radius \
     && mkdir -p /data /etc/radius-rs && chown radius /data
-COPY --from=build /src/target/release/radius-rs /src/target/release/radius-client /usr/local/bin/
+COPY --from=build /src/target/release/radius-rs /src/target/release/radius-client /src/target/release/radius-portal /usr/local/bin/
 COPY docker/config.toml /etc/radius-rs/config.toml
 
 USER radius
 WORKDIR /data
 VOLUME /data
-EXPOSE 1812/udp 1813/udp
+EXPOSE 1812/udp 1813/udp 8080/tcp
 ENTRYPOINT ["radius-rs"]
 CMD ["/etc/radius-rs/config.toml"]

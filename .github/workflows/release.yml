@@ -53,7 +53,7 @@ jobs:
         run: |
           name="radius-rs-${GITHUB_REF_NAME}-${{ matrix.target }}"
           mkdir -p "dist/$name"
-          cp target/${{ matrix.target }}/release/{radius-rs,radius-client} "dist/$name/"
+          cp target/${{ matrix.target }}/release/{radius-rs,radius-client,radius-portal} "dist/$name/"
           cp README.md LICENSE CHANGELOG.md config.example.toml "dist/$name/"
           tar -C dist -czf "dist/$name.tar.gz" "$name"
           (cd dist && shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256")
@@ -65,7 +65,7 @@ jobs:
         run: |
           $name = "radius-rs-$env:GITHUB_REF_NAME-${{ matrix.target }}"
           New-Item -ItemType Directory -Force "dist/$name" | Out-Null
-          Copy-Item target/${{ matrix.target }}/release/radius-rs.exe, target/${{ matrix.target }}/release/radius-client.exe, README.md, LICENSE, CHANGELOG.md, config.example.toml "dist/$name/"
+          Copy-Item target/${{ matrix.target }}/release/radius-rs.exe, target/${{ matrix.target }}/release/radius-client.exe, target/${{ matrix.target }}/release/radius-portal.exe, README.md, LICENSE, CHANGELOG.md, config.example.toml "dist/$name/"
           Compress-Archive -Path "dist/$name" -DestinationPath "dist/$name.zip"
           $hash = (Get-FileHash "dist/$name.zip" -Algorithm SHA256).Hash.ToLower()
           "$hash  $name.zip" | Out-File -Encoding ascii -NoNewline "dist/$name.zip.sha256"

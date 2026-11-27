@@ -1,4 +1,5 @@
 # Server starten:            docker compose up -d radius
+# Eingangsportal starten:    docker compose up -d portal   → http://localhost:8080
 # Demo-Client ausführen:     docker compose run --rm demo
 # Sessions anzeigen:         docker compose exec radius radius-rs sessions /etc/radius-rs/config.toml
 # Logs:                      docker compose logs -f radius
@@ -20,6 +21,22 @@ services:
       timeout: 5s
       retries: 3
       start_period: 3s
+    restart: unless-stopped
+
+  portal:
+    image: radius-rs:latest
+    entrypoint: ["radius-portal"]
+    environment:
+      PORTAL_TITLE: "Gäste-WLAN"
+      RADIUS_SERVER: "radius:1812"
+      RADIUS_ACCT_SERVER: "radius:1813"
+      RADIUS_SECRET: "testing123"
+      NAS_IDENTIFIER: "radius-portal"
+    ports:
+      - "8080:8080"
+    depends_on:
+      radius:
+        condition: service_healthy
     restart: unless-stopped
 
   demo:

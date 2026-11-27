@@ -2,6 +2,15 @@
 
 Alle nennenswerten Änderungen an diesem Projekt. Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionierung nach [Semantic Versioning](https://semver.org/lang/de/).
 
+## [Unreleased]
+
+### Neu
+- Eingangsportal `radius-portal` (Captive Portal) mit App-Oberfläche für Smartphones: Anmeldung, Statusseite mit Countdown bis zum Session-Timeout, Abmeldung, Dunkelmodus, installierbar als Web-App
+- Accounting Start/Stop aus dem Portal, automatisches Sitzungsende bei Session-Timeout
+- Sperre nach wiederholten Fehlversuchen pro IP, Content-Security-Policy, sichere Sitzungs-Cookies
+- Asynchroner RADIUS-Client als Bibliotheksmodul `client`
+- Portal im Docker-Image und in `docker-compose.yml`, in den Release-Paketen und in der CI
+
 ## [0.1.0] – 2026-11-24
 
 Erste veröffentlichte Version.

@@ -26,8 +26,9 @@ RADIUS ist das Protokoll, mit dem Access Points, Switches und VPN-Gateways (der 
 - [x] Status-Server für Health Checks
 - [x] Pro-Client Shared Secrets, Clients als einzelne IP oder Netz (CIDR, IPv4/IPv6), unbekannte Clients werden verworfen
 - [x] Argon2 und SQLite laufen im Blocking-Threadpool und bremsen den Async-Server nicht aus
+- [x] **Eingangsportal `radius-portal`** (Captive Portal) mit App-Oberfläche: Anmeldung per RADIUS, Accounting Start/Stop, Countdown bis zum Session-Timeout, Schutz vor Brute Force, installierbar als Web-App
 - [x] Eigener Testclient `radius-client`, der Antworten kryptografisch prüft
-- [x] 28 automatische Tests, darunter Testvektoren aus RFC 2865 und Property-Tests
+- [x] 37 automatische Tests, darunter Testvektoren aus RFC 2865 und Property-Tests
 - [x] **Interoperabilität mit FreeRADIUS**: 15 Tests mit `radclient` laufen bei jedem Push
 - [x] **Docker-Image** (121 MB, läuft ohne Root) und Compose-Demo mit Health Check
 - [x] **Automatische Releases**: Programme für Linux (x86_64, ARM64), Windows und macOS sowie Multi-Arch-Docker-Image auf ghcr.io
@@ -39,7 +40,7 @@ RADIUS ist das Protokoll, mit dem Access Points, Switches und VPN-Gateways (der 
 - [ ] EAP (PEAP/EAP-TLS) für WPA2-Enterprise
 - [ ] CoA/Disconnect (RFC 5176), um aktive Sessions zu trennen
 - [ ] Prometheus-Metriken
-- [ ] Demo mit echter Hardware (OpenWrt-Hotspot)
+- [ ] Demo mit echter Hardware (OpenWrt-Hotspot), Freigabe im Gateway durch das Portal
 - [ ] Fuzzing mit `cargo-fuzz`
 
 ## Architektur
@@ -57,6 +58,36 @@ NAS ─────────────────────────�
 ```
 
 `handler.rs` arbeitet nur mit Bytes rein und Bytes raus. Dadurch lässt sich die gesamte Protokoll-Logik ohne Sockets testen. Das Benutzer-Backend steckt hinter dem Trait `Authenticator` und lässt sich gegen SQL oder LDAP austauschen.
+
+## Eingangsportal
+
+![Eingangsportal: Anmeldung, Fehlermeldung, Verbunden mit Countdown, Dunkelmodus](docs/portal.png)
+
+`radius-portal` ist die Anmeldeseite eines Gäste-WLANs, wie man sie aus Hotels oder Cafés kennt. Das Portal arbeitet selbst als NAS: Es prüft Benutzername und Passwort per RADIUS, meldet Beginn und Ende jeder Sitzung per Accounting und beendet die Sitzung, wenn der vom Server vorgegebene `Session-Timeout` abläuft.
+
+```bash
+docker compose up -d portal          # startet Server und Portal → http://localhost:8080
+```
+
+Ohne Docker, bei laufendem Server:
+
+```bash
+PORTAL_TITLE="Gäste-WLAN" RADIUS_SECRET=testing123 cargo run --bin radius-portal
+```
+
+| Variable | Standard | Bedeutung |
+|---|---|---|
+| `PORTAL_LISTEN` | `0.0.0.0:8080` | Adresse der Weboberfläche |
+| `PORTAL_TITLE` | `Gäste-WLAN` | Überschrift |
+| `RADIUS_SERVER` / `RADIUS_ACCT_SERVER` | `127.0.0.1:1812` / `:1813` | RADIUS-Server |
+| `RADIUS_SECRET` | `testing123` | Shared Secret (muss zum Client-Eintrag in `config.toml` passen) |
+| `NAS_IDENTIFIER` | `radius-portal` | Name des Portals in den Accounting-Daten |
+| `PORTAL_SECURE_COOKIE` | `0` | `1` = Cookie nur über HTTPS (hinter einem TLS-Proxy) |
+| `PORTAL_MAX_FAILURES` | `5` | Fehlversuche pro IP in 5 Minuten, danach Sperre |
+
+**Sicherheit:** Sitzungs-Cookie mit 128 Bit aus dem Zufallsgenerator des Betriebssystems, `HttpOnly` und `SameSite=Strict`; Content-Security-Policy ohne Inline-Skripte; alle Ausgaben HTML-maskiert, auch die Reply-Message des Servers; Sperre nach wiederholten Fehlversuchen; jede RADIUS-Antwort wird über Response Authenticator und Message-Authenticator geprüft.
+
+**Grenze:** Das Portal gibt keinen Internetzugang in der Firewall frei. In einem echten Hotspot übernimmt das ein Gateway (zum Beispiel OpenWrt mit nftables), das Portal liefert Anmeldung, Sitzungsverwaltung und RADIUS-Anbindung.
 
 ## Installation
 
@@ -192,6 +223,7 @@ cargo test
 | `net`, `config` | CIDR für IPv4/IPv6, IPv4-mapped IPv6, spezifischster Client gewinnt, ungültige Adressen |
 | End-to-End | Echtes UDP: Accept, Reject, Verwerfen ohne Message-Authenticator, Duplikat (Passwort wird nur einmal geprüft), Accounting landet in der DB |
 | Interop | 15 Tests mit `radclient` (FreeRADIUS 3.2), gegen Binary und Docker-Container |
+| Portal | Anmeldung, Fehlversuch, Status, Abmeldung mit Accounting-Stop, Session-Timeout, Sperre nach 5 Fehlversuchen, Server nicht erreichbar, Sicherheits-Header |
 
 ## Design-Entscheidungen
 

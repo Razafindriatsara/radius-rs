@@ -67,10 +67,18 @@ jobs:
         run: docker compose up -d --wait radius
       - name: Demo-Client
         run: docker compose run --rm demo
+      - name: Eingangsportal
+        run: |
+          docker compose up -d portal
+          for i in $(seq 1 20); do curl -fsS http://127.0.0.1:8080/health && break; sleep 1; done
+          code=$(curl -s -o /dev/null -w '%{http_code}' -d 'username=martin&password=geheim123' http://127.0.0.1:8080/login)
+          test "$code" = "303"
+          code=$(curl -s -o /dev/null -w '%{http_code}' -d 'username=martin&password=falsch' http://127.0.0.1:8080/login)
+          test "$code" = "401"
       - name: radclient gegen den Container
         run: SERVER=127.0.0.1 AUTH_PORT=1812 ACCT_PORT=1813 SKIP_START=1 ./scripts/interop-freeradius.sh
       - name: Logs und Aufräumen
         if: always()
         run: |
-          docker compose logs radius
+          docker compose logs radius portal
           docker compose down -v
